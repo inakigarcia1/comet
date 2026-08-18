@@ -456,9 +456,89 @@
           type="number"
           min="0"
           value="0"
-          label="Max Size (GB)"
+          label="Max Size (GB) — legacy global fallback"
           placeholder="Enter max size in gigabytes"
         ></sl-input>
+      </div>
+
+      <div class="form-item">
+        <sl-input
+          id="maxSizeMovie"
+          type="number"
+          min="0"
+          value="0"
+          label="Max Movie Size (GB)"
+          placeholder="Override for movies (0 = use legacy)"
+        ></sl-input>
+      </div>
+
+      <div class="form-item">
+        <sl-input
+          id="maxSizeSeries"
+          type="number"
+          min="0"
+          value="0"
+          label="Max Series/Episode Size (GB)"
+          placeholder="Override for series (0 = use legacy)"
+        ></sl-input>
+      </div>
+
+      <div class="form-item">
+        <sl-input
+          id="minBitrateMbps"
+          type="number"
+          min="0"
+          value="0"
+          step="0.1"
+          label="Minimum Bitrate (Mbps)"
+          placeholder="Disabled when 0; needs ?durationMinutes"
+        ></sl-input>
+      </div>
+
+      <div class="form-item">
+        <sl-input
+          id="maxBitrateMbps"
+          type="number"
+          min="0"
+          value="0"
+          step="0.1"
+          label="Maximum Bitrate (Mbps)"
+          placeholder="Disabled when 0; needs ?durationMinutes"
+        ></sl-input>
+      </div>
+
+      <div class="form-item">
+        <sl-input
+          id="filenameInclude"
+          label="Preferred/Required filename contains (comma separated)"
+          placeholder="FraMeSToR, NTb, HONE"
+        ></sl-input>
+      </div>
+
+      <div class="form-item">
+        <sl-input
+          id="filenameExclude"
+          label="Excluded filename contains (comma separated)"
+          placeholder="YIFY, YTS"
+        ></sl-input>
+      </div>
+
+      <div class="form-item">
+        <sl-select
+          id="releaseTypesAllowlist"
+          label="Allowed Release Types (empty = all non-blocked)"
+          multiple
+          clearable
+        ></sl-select>
+      </div>
+
+      <div class="form-item">
+        <sl-select
+          id="releaseTypesBlocklist"
+          label="Blocked Release Types"
+          multiple
+          clearable
+        ></sl-select>
       </div>
 
       <div
@@ -984,6 +1064,21 @@
           const resultFormatSelect = document.getElementById("resultFormat");
           resultFormatSelect.value = defaultResultFormat;
 
+          if (Array.isArray(webConfig.releaseTypes)) {
+            const populateReleaseSelect = (selectId) => {
+              const select = document.getElementById(selectId);
+              if (!select) return;
+              webConfig.releaseTypes.forEach((entry) => {
+                const option = document.createElement("sl-option");
+                option.value = entry.key;
+                option.textContent = entry.label;
+                select.appendChild(option);
+              });
+            };
+            populateReleaseSelect("releaseTypesAllowlist");
+            populateReleaseSelect("releaseTypesBlocklist");
+          }
+
           // Live preview for result format
           function updateResultFormatPreview() {
             const sel = document.getElementById("resultFormat");
@@ -1141,6 +1236,24 @@
             const rankThreshold = document.getElementById("rankThreshold").value;
             const maxResultsPerResolution = document.getElementById("maxResultsPerResolution").value;
             const maxSize = document.getElementById("maxSize").value;
+            const maxSizeMovie = document.getElementById("maxSizeMovie").value;
+            const maxSizeSeries = document.getElementById("maxSizeSeries").value;
+            const minBitrateMbps = document.getElementById("minBitrateMbps").value;
+            const maxBitrateMbps = document.getElementById("maxBitrateMbps").value;
+            const filenameInclude = document.getElementById("filenameInclude").value
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean);
+            const filenameExclude = document.getElementById("filenameExclude").value
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean);
+            const releaseTypesAllowlist = Array.from(
+              document.getElementById("releaseTypesAllowlist").selectedOptions || [],
+            ).map((option) => option.value);
+            const releaseTypesBlocklist = Array.from(
+              document.getElementById("releaseTypesBlocklist").selectedOptions || [],
+            ).map((option) => option.value);
             const cachedOnly = document.getElementById("cachedOnly").checked;
             const sortCachedUncachedTogether = document.getElementById("sortCachedUncachedTogether").checked;
             const removeTrash = document.getElementById("removeTrash").checked;
@@ -1162,6 +1275,14 @@
             return {
               maxResultsPerResolution: parseInt(maxResultsPerResolution),
               maxSize: parseFloat(maxSize * 1073741824),
+              maxSizeMovie: parseFloat(maxSizeMovie * 1073741824),
+              maxSizeSeries: parseFloat(maxSizeSeries * 1073741824),
+              minBitrateMbps: parseFloat(minBitrateMbps),
+              maxBitrateMbps: parseFloat(maxBitrateMbps),
+              filenameInclude: filenameInclude,
+              filenameExclude: filenameExclude,
+              releaseTypesAllowlist: releaseTypesAllowlist,
+              releaseTypesBlocklist: releaseTypesBlocklist,
               cachedOnly: cachedOnly,
               sortCachedUncachedTogether: sortCachedUncachedTogether,
               removeTrash: removeTrash,
@@ -1454,6 +1575,29 @@
               document.getElementById("maxResultsPerResolution").value = settings.maxResultsPerResolution;
             if (settings.maxSize !== null)
               document.getElementById("maxSize").value = settings.maxSize / 1073741824;
+            if (settings.maxSizeMovie !== null && settings.maxSizeMovie !== undefined)
+              document.getElementById("maxSizeMovie").value = settings.maxSizeMovie / 1073741824;
+            if (settings.maxSizeSeries !== null && settings.maxSizeSeries !== undefined)
+              document.getElementById("maxSizeSeries").value = settings.maxSizeSeries / 1073741824;
+            if (settings.minBitrateMbps !== null && settings.minBitrateMbps !== undefined)
+              document.getElementById("minBitrateMbps").value = settings.minBitrateMbps;
+            if (settings.maxBitrateMbps !== null && settings.maxBitrateMbps !== undefined)
+              document.getElementById("maxBitrateMbps").value = settings.maxBitrateMbps;
+            if (Array.isArray(settings.filenameInclude))
+              document.getElementById("filenameInclude").value = settings.filenameInclude.join(", ");
+            if (Array.isArray(settings.filenameExclude))
+              document.getElementById("filenameExclude").value = settings.filenameExclude.join(", ");
+            const populateReleaseTypeSelect = (id, values) => {
+              const el = document.getElementById(id);
+              if (!el || !Array.isArray(values)) return;
+              const requested = new Set(values.map((v) => String(v).toLowerCase()));
+              const opts = Array.from(el.querySelectorAll("sl-option")).filter((opt) =>
+                requested.has(String(opt.value).toLowerCase()),
+              );
+              el.value = opts.map((opt) => opt.value);
+            };
+            populateReleaseTypeSelect("releaseTypesAllowlist", settings.releaseTypesAllowlist);
+            populateReleaseTypeSelect("releaseTypesBlocklist", settings.releaseTypesBlocklist);
 
             // Handle multi-debrid format
             if (settings.debridServices && settings.debridServices.length > 0) {

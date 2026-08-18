@@ -1129,6 +1129,10 @@
             <sl-icon name="share"></sl-icon>
             &nbsp;CometNet P2P
           </sl-tab>
+          <sl-tab slot="nav" panel="manual-torrents">
+            <sl-icon name="plus-circle"></sl-icon>
+            &nbsp;Manual Torrents
+          </sl-tab>
 
           <sl-tab-panel name="connections">
             <div class="tab-content">
@@ -2114,6 +2118,76 @@
               </div>
             </div>
           </sl-tab-panel>
+
+          <sl-tab-panel name="manual-torrents">
+            <div class="tab-content">
+              <div class="metric-section">
+                <h3>Insert Manual Torrent</h3>
+                <div class="metric-subsection">
+                  <div class="form-grid">
+                    <sl-select id="manual-media-type" label="Media Type" value="movie">
+                      <sl-option value="movie">Movie</sl-option>
+                      <sl-option value="series">Series</sl-option>
+                    </sl-select>
+                    <sl-input id="manual-media-id" label="Media ID (e.g. tt1234567)" placeholder="tt1234567"></sl-input>
+                    <sl-input id="manual-season" type="number" min="0" label="Season (series only)" placeholder="1"></sl-input>
+                    <sl-input id="manual-episode" type="number" min="0" label="Episode (series only)" placeholder="1"></sl-input>
+                    <sl-input id="manual-info-hash" label="Info Hash (40 hex chars)" placeholder="0123456789abcdef0123456789abcdef01234567"></sl-input>
+                    <sl-input id="manual-magnet" label="Magnet (optional; overrides info hash/title)" placeholder="magnet:?xt=urn:btih:..."></sl-input>
+                    <sl-input id="manual-title" label="Title (release filename)" placeholder="Movie.Name.2025.2160p.UHD.BluRay.REMUX-GROUP"></sl-input>
+                    <sl-input id="manual-size" type="number" min="0" label="Size (bytes)" placeholder="0"></sl-input>
+                    <sl-input id="manual-file-index" type="number" min="0" label="File Index (optional)" placeholder="0"></sl-input>
+                    <sl-input id="manual-seeders" type="number" min="0" label="Seeders" placeholder="0"></sl-input>
+                    <sl-input id="manual-tracker" label="Tracker" placeholder="Manual"></sl-input>
+                    <sl-input id="manual-sources" label="Sources (comma separated)"></sl-input>
+                    <sl-switch id="manual-share-cometnet">Share with CometNet</sl-switch>
+                  </div>
+                  <div class="metric-subsection" style="margin-top: 16px;">
+                    <sl-button id="manual-submit" variant="primary">Add Manual Torrent</sl-button>
+                    <span id="manual-status" style="margin-left: 12px"></span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="metric-section">
+                <h3>Bulk Insert</h3>
+                <div class="metric-subsection">
+                  <sl-textarea id="manual-bulk-input" rows="6" placeholder='Paste JSON array of manual torrent objects'></sl-textarea>
+                  <div class="metric-subsection" style="margin-top: 12px;">
+                    <sl-button id="manual-bulk-submit" variant="primary">Import Bulk</sl-button>
+                    <span id="manual-bulk-status" style="margin-left: 12px"></span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="metric-section">
+                <h3>Existing Manual Torrents</h3>
+                <div class="metric-subsection">
+                  <sl-button id="manual-refresh" variant="default">Refresh List</sl-button>
+                  <span id="manual-list-status" style="margin-left: 12px"></span>
+                </div>
+                <div class="metric-subsection" style="margin-top: 12px; overflow-x: auto;">
+                  <table id="manual-table" style="width: 100%; border-collapse: collapse;">
+                    <thead>
+                      <tr style="text-align: left; border-bottom: 1px solid #444;">
+                        <th style="padding: 8px;">Media</th>
+                        <th style="padding: 8px;">Hash</th>
+                        <th style="padding: 8px;">Title</th>
+                        <th style="padding: 8px;">S/E</th>
+                        <th style="padding: 8px;">Size</th>
+                        <th style="padding: 8px;">Seeders</th>
+                        <th style="padding: 8px;">Tracker</th>
+                        <th style="padding: 8px;">Share</th>
+                        <th style="padding: 8px;">Updated</th>
+                        <th style="padding: 8px;">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody id="manual-table-body"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </sl-tab-panel>
         </sl-tab-group>
       </div>
     </div>
@@ -2142,6 +2216,7 @@
       let logsInterval = null;
       let cometnetInterval = null;
       let backgroundScraperInterval = null;
+      let manualTorrentsInterval = null;
       let backgroundScraperNextCycleTicker = null;
       let backgroundScraperNextCycleState = "stopped";
       let backgroundScraperNextCycleTargetTs = null;
@@ -2291,6 +2366,10 @@
           clearInterval(backgroundScraperInterval);
           backgroundScraperInterval = null;
         }
+        if (manualTorrentsInterval) {
+          clearInterval(manualTorrentsInterval);
+          manualTorrentsInterval = null;
+        }
       }
 
       function setupAutoRefreshForTab(tab) {
@@ -2317,6 +2396,9 @@
             break;
           case "cometnet":
             cometnetInterval = setInterval(loadCometNetStats, 10000);
+            break;
+          case "manual-torrents":
+            manualTorrentsInterval = setInterval(loadManualTorrents, 15000);
             break;
         }
       }
@@ -2378,6 +2460,9 @@
             break;
           case "cometnet":
             loadCometNetStats();
+            break;
+          case "manual-torrents":
+            loadManualTorrents();
             break;
           case "system":
             checkUpdateStatus();
@@ -4371,6 +4456,253 @@
             .join("");
         }
       }
+
+      function _manualTorrentValue(id) {
+        const el = document.getElementById(id);
+        if (!el) return "";
+        return (el.value || "").trim();
+      }
+
+      function _manualTorrentInt(id) {
+        const raw = _manualTorrentValue(id);
+        if (!raw) return null;
+        const parsed = parseInt(raw, 10);
+        return Number.isNaN(parsed) ? null : parsed;
+      }
+
+      function _setManualStatus(id, success, message) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = message;
+        el.style.color = success ? "#7dd87d" : "#ff7d7d";
+      }
+
+      function _buildManualPayload() {
+        const sources = _manualTorrentValue("manual-sources")
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+        const mediaType = _manualTorrentValue("manual-media-type") || "movie";
+        const payload = {
+          mediaId: _manualTorrentValue("manual-media-id"),
+          mediaType: mediaType,
+          size: _manualTorrentInt("manual-size") ?? 0,
+          seeders: _manualTorrentInt("manual-seeders") ?? 0,
+          tracker: _manualTorrentValue("manual-tracker") || "Manual",
+          sources: sources,
+          shareCometnet: Boolean(
+            document.getElementById("manual-share-cometnet").checked,
+          ),
+        };
+        const infoHash = _manualTorrentValue("manual-info-hash");
+        if (infoHash) payload.infoHash = infoHash;
+        const magnet = _manualTorrentValue("manual-magnet");
+        if (magnet) payload.magnet = magnet;
+        const title = _manualTorrentValue("manual-title");
+        if (title) payload.title = title;
+        const fileIndex = _manualTorrentInt("manual-file-index");
+        if (fileIndex !== null) payload.fileIndex = fileIndex;
+        if (mediaType === "series") {
+          const season = _manualTorrentInt("manual-season");
+          const episode = _manualTorrentInt("manual-episode");
+          if (season !== null) payload.season = season;
+          if (episode !== null) payload.episode = episode;
+        }
+        return payload;
+      }
+
+      async function submitManualTorrent() {
+        const payload = _buildManualPayload();
+        if (!payload.mediaId) {
+          _setManualStatus("manual-status", false, "Media ID is required");
+          return;
+        }
+        try {
+          const res = await fetch("/admin/api/torrents/manual", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (!res.ok) {
+            const detail = await res.json().catch(() => ({}));
+            _setManualStatus(
+              "manual-status",
+              false,
+              `Error: ${detail.detail || res.statusText}`,
+            );
+            return;
+          }
+          _setManualStatus(
+            "manual-status",
+            true,
+            `Inserted ${payload.mediaId}/${(payload.infoHash || "").slice(0, 8)}`,
+          );
+          loadManualTorrents();
+        } catch (err) {
+          _setManualStatus("manual-status", false, `Network error: ${err}`);
+        }
+      }
+
+      async function submitManualBulk() {
+        const raw = _manualTorrentValue("manual-bulk-input");
+        if (!raw) {
+          _setManualStatus("manual-bulk-status", false, "Empty input");
+          return;
+        }
+        let parsed;
+        try {
+          parsed = JSON.parse(raw);
+        } catch (err) {
+          _setManualStatus("manual-bulk-status", false, `Invalid JSON: ${err}`);
+          return;
+        }
+        if (!Array.isArray(parsed)) {
+          _setManualStatus(
+            "manual-bulk-status",
+            false,
+            "Expected a JSON array",
+          );
+          return;
+        }
+        try {
+          const res = await fetch("/admin/api/torrents/manual/bulk", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ torrents: parsed }),
+          });
+          const data = await res.json();
+          if (!res.ok) {
+            _setManualStatus(
+              "manual-bulk-status",
+              false,
+              `Error: ${data.detail || res.statusText}`,
+            );
+            return;
+          }
+          _setManualStatus(
+            "manual-bulk-status",
+            true,
+            `Inserted ${data.inserted}/${data.total} (rejected: ${data.rejected.length})`,
+          );
+          loadManualTorrents();
+        } catch (err) {
+          _setManualStatus(
+            "manual-bulk-status",
+            false,
+            `Network error: ${err}`,
+          );
+        }
+      }
+
+      async function deleteManualTorrent(mediaId, infoHash, season, episode) {
+        const body = { mediaId, infoHash };
+        if (season !== null && season !== undefined)
+          body.season = season === -1 ? null : season;
+        if (episode !== null && episode !== undefined)
+          body.episode = episode === -1 ? null : episode;
+        try {
+          const res = await fetch("/admin/api/torrents/manual", {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          if (!res.ok) {
+            const detail = await res.json().catch(() => ({}));
+            _setManualStatus(
+              "manual-list-status",
+              false,
+              `Delete failed: ${detail.detail || res.statusText}`,
+            );
+            return;
+          }
+          _setManualStatus("manual-list-status", true, "Deleted");
+          loadManualTorrents();
+        } catch (err) {
+          _setManualStatus(
+            "manual-list-status",
+            false,
+            `Network error: ${err}`,
+          );
+        }
+      }
+
+      async function loadManualTorrents() {
+        const tbody = document.getElementById("manual-table-body");
+        if (!tbody) return;
+        try {
+          const res = await fetch(
+            "/admin/api/torrents/manual?limit=200&offset=0",
+          );
+          if (!res.ok) {
+            _setManualStatus(
+              "manual-list-status",
+              false,
+              `Error: ${res.statusText}`,
+            );
+            return;
+          }
+          const data = await res.json();
+          tbody.innerHTML = (data.torrents || [])
+            .map((t) => {
+              const updated = t.updatedAt
+                ? new Date(t.updatedAt * 1000).toISOString()
+                : "";
+              const season = t.season == null ? "-" : t.season;
+              const episode = t.episode == null ? "-" : t.episode;
+              return `
+                <tr style="border-bottom: 1px solid #333;">
+                  <td style="padding: 6px;">${t.mediaId}</td>
+                  <td style="padding: 6px; font-family: monospace;">${t.infoHash.slice(0, 8)}…</td>
+                  <td style="padding: 6px;">${t.title}</td>
+                  <td style="padding: 6px;">S${season}/E${episode}</td>
+                  <td style="padding: 6px;">${t.size}</td>
+                  <td style="padding: 6px;">${t.seeders}</td>
+                  <td style="padding: 6px;">${t.tracker || ""}</td>
+                  <td style="padding: 6px;">${t.shareCometnet ? "✓" : ""}</td>
+                  <td style="padding: 6px;">${updated}</td>
+                  <td style="padding: 6px;">
+                    <sl-button size="small" data-action="delete-manual"
+                      data-media-id="${t.mediaId}"
+                      data-info-hash="${t.infoHash}"
+                      data-season="${t.season ?? -1}"
+                      data-episode="${t.episode ?? -1}">Delete</sl-button>
+                  </td>
+                </tr>
+              `;
+            })
+            .join("");
+          tbody.querySelectorAll("[data-action='delete-manual']").forEach((btn) => {
+            btn.addEventListener("click", () => {
+              deleteManualTorrent(
+                btn.dataset.mediaId,
+                btn.dataset.infoHash,
+                parseInt(btn.dataset.season, 10),
+                parseInt(btn.dataset.episode, 10),
+              );
+            });
+          });
+          _setManualStatus(
+            "manual-list-status",
+            true,
+            `${data.torrents.length} manual torrents`,
+          );
+        } catch (err) {
+          _setManualStatus(
+            "manual-list-status",
+            false,
+            `Network error: ${err}`,
+          );
+        }
+      }
+
+      document.addEventListener("DOMContentLoaded", () => {
+        const submitBtn = document.getElementById("manual-submit");
+        if (submitBtn) submitBtn.addEventListener("click", submitManualTorrent);
+        const bulkBtn = document.getElementById("manual-bulk-submit");
+        if (bulkBtn) bulkBtn.addEventListener("click", submitManualBulk);
+        const refreshBtn = document.getElementById("manual-refresh");
+        if (refreshBtn) refreshBtn.addEventListener("click", loadManualTorrents);
+      });
     </script>
   </body>
 </html>
