@@ -270,3 +270,52 @@ class SchemaMigrationMetadataCacheTests(unittest.IsolatedAsyncioTestCase):
         database.fetch_one.assert_not_awaited()
         database.fetch_all.assert_not_awaited()
         self.assertEqual(database.execute.await_count, 3)
+
+
+class TorrentsIsManualMigrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_is_manual_columns_added_with_defaults(self):
+        with TemporaryDirectory() as temp_dir:
+            database = ReplicaAwareDatabase(
+                Database(f"sqlite+aiosqlite:///{temp_dir}/migration.db")
+            )
+            await database.connect()
+            try:
+                from comet.core.schema_migrations import (
+                    _migration_torrents_is_manual,
+                    run_schema_migrations,
+                )
+
+                # Pre-create the legacy torrents table without is_manual.
+                await database.execute(
+                    """
+                    CREATE TABLE torrents (
+                        media_id TEXT NOT NULL,
+                        info_hash TEXT NOT NULL,
+                        season INTEGER,
+                        episode INTEGER,
+                        season_norm INTEGER NOT NULL DEFAULT -1,
+                        episode_norm INTEGER NOT NULL DEFAULT -1,
+                        file_index INTEGER,
+                        title TEXT NOT NULL,
+                        seeders INTEGER,
+                        size BIGINT,
+                        tracker TEXT,
+                        sources_json TEXT NOT NULL DEFAULT '[]',
+                        parsed_json TEXT NOT NULL,
+                        updated_at REAL NOT NULL
+                    )
+                    """
+                )
+                context = MigrationContext(
+                    database,
+                    is_sqlite=True,
+                    is_postgres=False,
+                )
+                await _migration_torrents_is_manual(context)
+
+                rows = await database.fetch_all("PRAGMA table_info(torrents)")
+                column_names = {row["name"] for row in rows}
+                self.assertIn("is_manual", column_names)
+                self.assertIn("manual_share_cometnet", column_names)
+            finally:
+                await database.disconnect()

@@ -81,19 +81,19 @@ class FilenameFilter:
 class ReleaseTypeFilter:
     """Allow/block based on the central release-type taxonomy."""
 
-    __slots__ = ("allow", "block")
+    __slots__ = ("allow", "block", "_matches")
 
     def __init__(self, allow: Iterable[str] | None, block: Iterable[str] | None):
         # Lazy import to keep the dependency local.
         from comet.utils.release_types import matches_release_filters
 
-        self._matches = matches_release_filters
         self.allow = [
             entry.lower() for entry in (allow or []) if isinstance(entry, str)
         ]
         self.block = [
             entry.lower() for entry in (block or []) if isinstance(entry, str)
         ]
+        self._matches = matches_release_filters
 
     @property
     def is_active(self) -> bool:

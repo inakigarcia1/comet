@@ -27,7 +27,7 @@ class ManualTorrentIn(BaseModel):
 
     mediaId: str = Field(..., min_length=1, max_length=128)
     mediaType: str = Field(..., min_length=1)
-    infoHash: str | None = Field(default=None, max_length=64)
+    infoHash: str | None = Field(default=None, min_length=40, max_length=64)
     title: str | None = Field(default=None, max_length=512)
     size: int = Field(default=0, ge=0)
     seeders: int = Field(default=0, ge=0)

@@ -1359,7 +1359,11 @@ class ConfigModel(BaseModel):
         if v is None:
             return []
         if isinstance(v, list):
-            return [str(item) for item in v if isinstance(item, str) and item]
+            return [
+                stripped
+                for item in v
+                if isinstance(item, str) and (stripped := item.strip())
+            ]
         return v
 
     @field_validator("debridService")
