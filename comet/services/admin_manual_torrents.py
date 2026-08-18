@@ -6,13 +6,13 @@ is the `is_manual` flag, which is set via `_apply_manual_flags` after the
 upsert succeeds so the column is never exposed to scraper-side ON CONFLICT
 updates.
 """
+
 from __future__ import annotations
 
-import asyncio
 import time
 
 from comet.api.models.manual_torrent import ManualTorrentIn
-from comet.core.database import NULL_SCOPE_SENTINEL, normalize_scope_value
+from comet.core.database import normalize_scope_value
 from comet.core.models import database
 from comet.services.torrent_manager import torrent_update_queue
 
@@ -129,7 +129,6 @@ async def delete_manual(
 ) -> int:
     season_norm = normalize_scope_value(season)
     episode_norm = normalize_scope_value(episode)
-    sentinel = NULL_SCOPE_SENTINEL
     return await database.execute(
         """
         DELETE FROM torrents

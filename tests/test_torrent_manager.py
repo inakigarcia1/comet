@@ -169,9 +169,7 @@ class TorrentPersistenceTests(unittest.IsolatedAsyncioTestCase):
         zero_size = self._make_update("zero-size.mkv", 3)
         zero_size.size = 0
 
-        with patch.object(
-            torrent_manager, "get_active_backend", return_value=backend
-        ):
+        with patch.object(torrent_manager, "get_active_backend", return_value=backend):
             await queue._enqueue_broadcast_items(
                 [missing_size, valid, zero_size], updated_at=123.0
             )

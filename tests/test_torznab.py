@@ -75,9 +75,7 @@ def _result(count: int, *, media_type: str = "movie") -> MediaSearchResult:
     return MediaSearchResult(
         MediaSearchStatus.OK,
         metadata={"title": "Movie", "year": 2024},
-        torrents={
-            info_hash: _torrent(index) for index, info_hash in enumerate(hashes)
-        },
+        torrents={info_hash: _torrent(index) for index, info_hash in enumerate(hashes)},
         ranked_info_hashes=hashes,
         media_only_id="tt1234567",
         search_season=0 if media_type == "series" else None,
@@ -187,9 +185,10 @@ class TorznabPureTests(unittest.IsolatedAsyncioTestCase):
             "t=search&o=json",
         )
         for query in invalid_queries:
-            with self.subTest(query=query), self.assertRaises(
-                TorznabProtocolError
-            ) as context:
+            with (
+                self.subTest(query=query),
+                self.assertRaises(TorznabProtocolError) as context,
+            ):
                 parse_torznab_query(_request(query))
             self.assertEqual(context.exception.code, 201)
 
@@ -198,9 +197,7 @@ class TorznabPureTests(unittest.IsolatedAsyncioTestCase):
         title_match = SimpleNamespace(
             imdb_id="tt7654321", media_type="series", year=2024
         )
-        parsed = parse_torznab_query(
-            _request("t=search&q=Show.Name.S01E002&cat=5000")
-        )
+        parsed = parse_torznab_query(_request("t=search&q=Show.Name.S01E002&cat=5000"))
         with patch(
             "comet.api.endpoints.torznab.resolve_imdb_title",
             new=AsyncMock(return_value=title_match),
@@ -228,9 +225,7 @@ class TorznabPureTests(unittest.IsolatedAsyncioTestCase):
         episode_lookup.assert_awaited_once_with("tt7654321", "2026-07-25")
 
         prioritized = parse_torznab_query(
-            _request(
-                "t=search&imdbid=1234567&q=Different.Show.S01E02&cat=5000"
-            )
+            _request("t=search&imdbid=1234567&q=Different.Show.S01E02&cat=5000")
         )
         target = await resolve_search_target(
             prioritized, category_constraint(prioritized.categories), session
@@ -272,9 +267,7 @@ class TorznabPureTests(unittest.IsolatedAsyncioTestCase):
         upsert.assert_not_awaited()
 
         nearby_session = _Session(
-            _Response(
-                {"d": [{"id": "tt2222222", "qid": "tvSeries", "y": 2025}]}
-            )
+            _Response({"d": [{"id": "tt2222222", "qid": "tvSeries", "y": 2025}]})
         )
         with _uncached_title_lookups():
             nearby_match = await resolve_imdb_title(
@@ -353,9 +346,7 @@ class TorznabPureTests(unittest.IsolatedAsyncioTestCase):
                 new=AsyncMock(return_value=None),
             ) as media_type_lookup,
         ):
-            target = await find_recent_target(
-                CategoryConstraint(None, False), object()
-            )
+            target = await find_recent_target(CategoryConstraint(None, False), object())
 
         self.assertIsNone(target)
         media_type_lookup.assert_awaited_once_with("tt1111111")
@@ -363,9 +354,7 @@ class TorznabPureTests(unittest.IsolatedAsyncioTestCase):
     def test_xml_serialization_sanitizes_and_emits_required_fields(self):
         result = _result(1)
         info_hash = result.ranked_info_hashes[0]
-        result.torrents[info_hash] = _torrent(
-            0, title="A & B < C\x00 😀", seeders=0
-        )
+        result.torrents[info_hash] = _torrent(0, title="A & B < C\x00 😀", seeders=0)
 
         content, total = serialize_feed(
             result,

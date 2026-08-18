@@ -282,7 +282,6 @@ class TorrentsIsManualMigrationTests(unittest.IsolatedAsyncioTestCase):
             try:
                 from comet.core.schema_migrations import (
                     _migration_torrents_is_manual,
-                    run_schema_migrations,
                 )
 
                 # Pre-create the legacy torrents table without is_manual.

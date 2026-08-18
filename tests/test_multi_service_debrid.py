@@ -3,12 +3,12 @@ import unittest
 from typing import ClassVar
 from unittest.mock import patch
 
+from comet.debrid.exceptions import DebridAuthError
 from comet.services.media_search import (
     check_multi_service_availability,
     get_and_cache_multi_service_availability,
     select_debrid_refresh_hashes,
 )
-from comet.debrid.exceptions import DebridAuthError
 from comet.utils.parsing import MediaScope
 
 

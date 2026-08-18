@@ -1,11 +1,10 @@
 """Tests for the manual torrents admin API and persistence plumbing."""
+
 import time
 import unittest
 from unittest.mock import patch
 
 import orjson
-
-from tests.rtn_stub import parse
 
 
 class ManualTorrentModelValidationTests(unittest.TestCase):
@@ -18,9 +17,7 @@ class ManualTorrentModelValidationTests(unittest.TestCase):
             magnet="magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=Movie.Name.2025.REMUX-GROUP&tr=udp://tracker.example.com",
         )
         resolved = item.resolve()
-        self.assertEqual(
-            resolved.infoHash, "0123456789abcdef0123456789abcdef01234567"
-        )
+        self.assertEqual(resolved.infoHash, "0123456789abcdef0123456789abcdef01234567")
         self.assertEqual(resolved.title, "Movie.Name.2025.REMUX-GROUP")
         self.assertIn("udp://tracker.example.com", resolved.sources)
 
@@ -119,7 +116,6 @@ class ManualTorrentAdminEndpointsTests(unittest.TestCase):
     def test_post_manual_torrent_inserts(self):
         import asyncio
 
-        from comet.api.models.manual_torrent import ManualTorrentIn
         from comet.api.models.manual_torrent import (
             ManualTorrentIn as _Payload,
         )
@@ -132,11 +128,11 @@ class ManualTorrentAdminEndpointsTests(unittest.TestCase):
         )
 
         async def _run():
-            with patch.object(self.admin, "require_admin_auth"), patch.object(
-                self.admin, "insert_manual"
-            ) as mock_insert, patch.object(
-                self.admin, "wait_for_manual_flush"
-            ) as mock_flush:
+            with (
+                patch.object(self.admin, "require_admin_auth"),
+                patch.object(self.admin, "insert_manual") as mock_insert,
+                patch.object(self.admin, "wait_for_manual_flush") as mock_flush,
+            ):
                 response = await self.admin.admin_manual_torrent_create(
                     payload=payload,
                     admin_session="valid",
@@ -201,9 +197,11 @@ class ManualTorrentAdminEndpointsTests(unittest.TestCase):
         )
 
         async def _run():
-            with patch.object(self.admin, "require_admin_auth"), patch.object(
-                self.admin, "insert_manual_bulk"
-            ) as mock_bulk, patch.object(self.admin, "wait_for_manual_flush"):
+            with (
+                patch.object(self.admin, "require_admin_auth"),
+                patch.object(self.admin, "insert_manual_bulk") as mock_bulk,
+                patch.object(self.admin, "wait_for_manual_flush"),
+            ):
                 mock_bulk.return_value = (3, 0, [])
                 response = await self.admin.admin_manual_torrent_bulk(
                     payload=payload,
@@ -223,9 +221,10 @@ class ManualTorrentAdminEndpointsTests(unittest.TestCase):
         import asyncio
 
         async def _run():
-            with patch.object(self.admin, "require_admin_auth"), patch.object(
-                self.admin, "list_manual"
-            ) as mock_list:
+            with (
+                patch.object(self.admin, "require_admin_auth"),
+                patch.object(self.admin, "list_manual") as mock_list,
+            ):
                 mock_list.return_value = [
                     {
                         "mediaId": "tt0111161",
@@ -264,9 +263,10 @@ class ManualTorrentAdminEndpointsTests(unittest.TestCase):
         )
 
         async def _run():
-            with patch.object(self.admin, "require_admin_auth"), patch.object(
-                self.admin, "delete_manual"
-            ) as mock_delete:
+            with (
+                patch.object(self.admin, "require_admin_auth"),
+                patch.object(self.admin, "delete_manual") as mock_delete,
+            ):
                 mock_delete.return_value = 1
                 response = await self.admin.admin_manual_torrent_delete(
                     payload=payload,

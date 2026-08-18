@@ -4,6 +4,7 @@ Validation is the only behaviour here. The actual persistence is delegated to
 `comet.services.admin_manual_torrents` which routes through the existing
 `TorrentUpdateQueue`.
 """
+
 from __future__ import annotations
 
 import re
@@ -16,7 +17,9 @@ from comet.utils.formatting import normalize_info_hash
 
 _MEDIA_TYPES = ("movie", "series")
 _HASH_PATTERN = re.compile(r"^[0-9a-fA-F]{40}$")
-_MAGNET_HASH_PATTERN = re.compile(r"btih:([0-9a-fA-F]{40}|[a-zA-Z0-9]{32})", re.IGNORECASE)
+_MAGNET_HASH_PATTERN = re.compile(
+    r"btih:([0-9a-fA-F]{40}|[a-zA-Z0-9]{32})", re.IGNORECASE
+)
 _MAGNET_DN_PATTERN = re.compile(r"dn=([^&]+)")
 _MAGNET_TR_PATTERN = re.compile(r"tr=([^&]+)")
 _VALID_SOURCES = re.compile(r"^[a-zA-Z0-9_\-\.:&/?=]+$")
@@ -72,7 +75,7 @@ class ManualTorrentIn(BaseModel):
         return cleaned
 
     @model_validator(mode="after")
-    def _validate(self) -> "ManualTorrentIn":
+    def _validate(self) -> ManualTorrentIn:
         if self.mediaType == "series":
             if self.season is not None and self.season < 0:
                 raise ValueError("season must be >= 0")
@@ -83,7 +86,7 @@ class ManualTorrentIn(BaseModel):
                 raise ValueError("season/episode must be null for movie")
         return self
 
-    def resolve(self) -> "ManualTorrentIn":
+    def resolve(self) -> ManualTorrentIn:
         """Apply magnet extraction and RTN parsing. Returns a new instance with
         normalized hashes/title/sources. Raises ValueError on invalid RTN."""
         magnet = self.magnet
@@ -111,9 +114,7 @@ class ManualTorrentIn(BaseModel):
                         sources.append(tr)
 
         if not info_hash or not _HASH_PATTERN.match(info_hash):
-            raise ValueError(
-                "infoHash is required and must be a 40-char hex string"
-            )
+            raise ValueError("infoHash is required and must be a 40-char hex string")
         info_hash = normalize_info_hash(info_hash)
         if not title:
             raise ValueError("title is required (or magnet must include dn=)")

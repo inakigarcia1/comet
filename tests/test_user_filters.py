@@ -1,11 +1,11 @@
 """Tests for the user-controlled filter pipeline."""
+
 import unittest
 
 from comet.services.user_filters import (
     BitrateFilter,
     FilenameFilter,
     ReleaseTypeFilter,
-    UserFilters,
     build_user_filters,
     compute_effective_max_size,
     has_include_but_no_match,
@@ -170,7 +170,11 @@ class BuildUserFiltersTests(unittest.TestCase):
         cfg = {"releaseTypesBlocklist": ["cam"]}
         f = build_user_filters(cfg)
         cam = parse("Movie.2025.CAM")
-        self.assertFalse(f.filter_torrent({"title": "Movie.2025.CAM", "parsed": cam}, scope_matches=True))
+        self.assertFalse(
+            f.filter_torrent(
+                {"title": "Movie.2025.CAM", "parsed": cam}, scope_matches=True
+            )
+        )
 
 
 class HasIncludeButNoMatchTests(unittest.TestCase):

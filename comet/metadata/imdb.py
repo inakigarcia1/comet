@@ -182,9 +182,7 @@ async def resolve_imdb_title(
                 return None
             payload = await response.json()
     except Exception as exc:
-        logger.warning(
-            f"IMDb title search failed for {normalized_query!r}: {exc}"
-        )
+        logger.warning(f"IMDb title search failed for {normalized_query!r}: {exc}")
         return None
 
     match = _extract_title_match(payload, media_type, year)

@@ -49,9 +49,7 @@ class EpisodeIndexRefreshTests(unittest.IsolatedAsyncioTestCase):
                 new=AsyncMock(),
             ) as refresh,
         ):
-            episode = await service.get_episode_by_air_date(
-                "tt1234567", "2026-07-25"
-            )
+            episode = await service.get_episode_by_air_date("tt1234567", "2026-07-25")
 
         self.assertEqual(episode, (3, 9))
         self.assertEqual(cached_lookup.await_count, 2)

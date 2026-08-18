@@ -7,6 +7,7 @@ These run after `filter_worker` (title/year/adult) and before `rank_worker`
 All filters are constructed once per request and reused per torrent; no
 per-torrent regex compilation, no DB queries.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
@@ -54,7 +55,7 @@ class FilenameFilter:
     include. Empty include = accept any filename. Empty exclude = no rejects
     from this filter."""
 
-    __slots__ = ("include", "exclude")
+    __slots__ = ("exclude", "include")
 
     def __init__(self, include: Iterable[str] | None, exclude: Iterable[str] | None):
         self.include = _normalize_substrings(include)
@@ -81,7 +82,7 @@ class FilenameFilter:
 class ReleaseTypeFilter:
     """Allow/block based on the central release-type taxonomy."""
 
-    __slots__ = ("allow", "block", "_matches")
+    __slots__ = ("_matches", "allow", "block")
 
     def __init__(self, allow: Iterable[str] | None, block: Iterable[str] | None):
         # Lazy import to keep the dependency local.
@@ -109,13 +110,13 @@ class BitrateFilter:
     disables the filter for that candidate — the spec says we cannot
     confidently compute bitrate for season packs."""
 
-    __slots__ = ("min_mbps", "max_mbps", "duration_minutes")
+    __slots__ = ("duration_minutes", "max_mbps", "min_mbps")
 
     def __init__(
         self,
-        min_mbps: float | int | None,
-        max_mbps: float | int | None,
-        duration_minutes: float | int | None,
+        min_mbps: float | None,
+        max_mbps: float | None,
+        duration_minutes: float | None,
     ):
         try:
             self.min_mbps = float(min_mbps) if min_mbps else 0.0
@@ -126,9 +127,7 @@ class BitrateFilter:
         except (TypeError, ValueError):
             self.max_mbps = 0.0
         try:
-            self.duration_minutes = (
-                float(duration_minutes) if duration_minutes else 0.0
-            )
+            self.duration_minutes = float(duration_minutes) if duration_minutes else 0.0
         except (TypeError, ValueError):
             self.duration_minutes = 0.0
 
@@ -156,11 +155,10 @@ class BitrateFilter:
         # bitrate_mbps = (size_bytes * 8) / (duration_minutes * 60 * 1_000_000)
         duration_seconds = self.duration_minutes * 60.0
         bitrate = (float(size_bytes) * 8.0) / (duration_seconds * 1_000_000.0)
-        if self.min_mbps > 0 and bitrate < self.min_mbps:
-            return False
-        if self.max_mbps > 0 and bitrate > self.max_mbps:
-            return False
-        return True
+        return not (
+            (self.min_mbps > 0 and bitrate < self.min_mbps)
+            or (self.max_mbps > 0 and bitrate > self.max_mbps)
+        )
 
 
 class UserFilters:
@@ -192,22 +190,20 @@ class UserFilters:
     ) -> bool:
         if not self.any_active():
             return True
-        if not self.filename.matches(torrent.get("title", "")):
-            return False
-        if not self.release_type.matches(torrent.get("parsed")):
-            return False
-        if not self.bitrate.matches(
-            torrent.get("size"),
-            scope_matches=scope_matches,
-        ):
-            return False
-        return True
+        return (
+            self.filename.matches(torrent.get("title", ""))
+            and self.release_type.matches(torrent.get("parsed"))
+            and self.bitrate.matches(
+                torrent.get("size"),
+                scope_matches=scope_matches,
+            )
+        )
 
 
 def build_user_filters(
     config: Mapping[str, Any],
     *,
-    duration_minutes: float | int | None = None,
+    duration_minutes: float | None = None,
 ) -> UserFilters:
     return UserFilters(
         filename=FilenameFilter(
@@ -226,7 +222,9 @@ def build_user_filters(
     )
 
 
-def has_include_but_no_match(torrents: Iterable[dict], filename: FilenameFilter) -> bool:
+def has_include_but_no_match(
+    torrents: Iterable[dict], filename: FilenameFilter
+) -> bool:
     """Return True when `filenameInclude` is set and no cached torrent matches
     it. Used to trigger a bounded live refresh."""
     if not filename.include:

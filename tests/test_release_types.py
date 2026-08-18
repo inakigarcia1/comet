@@ -1,4 +1,5 @@
 """Tests for the centralized release-type taxonomy and web_config exposure."""
+
 import base64
 import unittest
 
@@ -124,9 +125,7 @@ class WebConfigReleaseTypesTests(unittest.TestCase):
 
 class LegacyConfigCompatibilityTests(unittest.TestCase):
     def test_legacy_b64_config_with_only_maxSize_returns_defaults(self):
-        encoded = base64.b64encode(
-            orjson.dumps({"maxSize": 5 * 1024**3})
-        ).decode()
+        encoded = base64.b64encode(orjson.dumps({"maxSize": 5 * 1024**3})).decode()
         cfg = config_check(encoded, strict_b64config=True)
         self.assertIsNotNone(cfg)
         self.assertEqual(cfg["maxSize"], 5 * 1024**3)

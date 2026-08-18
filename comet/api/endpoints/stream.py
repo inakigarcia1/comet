@@ -232,9 +232,7 @@ async def stream(
     debrid_entries = config["_debridEntries"]
     enable_torrent = config["_enableTorrent"]
     deduplicate_streams = config["deduplicateStreams"]
-    use_account_scrape = bool(
-        debrid_entries and config["scrapeDebridAccountTorrents"]
-    )
+    use_account_scrape = bool(debrid_entries and config["scrapeDebridAccountTorrents"])
     bitrate_filter_active = duration_minutes is not None and (
         config.get("minBitrateMbps") or config.get("maxBitrateMbps")
     )
@@ -306,9 +304,7 @@ async def stream(
             {
                 "streams": [
                     {
-                        "name": _stream_notice_name(
-                            kodi, "[⚠️] Comet", "[WARN] Comet"
-                        ),
+                        "name": _stream_notice_name(kodi, "[⚠️] Comet", "[WARN] Comet"),
                         "description": "Unable to get metadata.",
                         "url": "https://comet.feels.legal",
                     }
@@ -322,12 +318,9 @@ async def stream(
             {
                 "streams": [
                     {
-                        "name": _stream_notice_name(
-                            kodi, "[🔄] Comet", "[INFO] Comet"
-                        ),
+                        "name": _stream_notice_name(kodi, "[🔄] Comet", "[INFO] Comet"),
                         "description": (
-                            "Scraping in progress, please try again in a few "
-                            "seconds..."
+                            "Scraping in progress, please try again in a few seconds..."
                         ),
                         "url": "https://comet.feels.legal",
                     }

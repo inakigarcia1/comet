@@ -5,9 +5,9 @@ This stub must live in `tests/` so it never shadows the real package in
 production. Tests import `tests.rtn_stub` before importing any comet
 module that pulls in RTN.
 """
+
 import sys
 import types
-
 
 _RESOLUTIONS = [
     "r2160p",
@@ -280,7 +280,18 @@ def _make_pydantic_base():
         def model_dump(self, *args, **kwargs):
             data = super().model_dump(*args, **kwargs)
             # Strip Pydantic infrastructure so dumps look like real RTN dumps.
-            _skip_prefixes = ("model_", "parse_", "from_orm", "construct", "schema", "validate", "update_forward_refs", "copy", "dict", "json")
+            _skip_prefixes = (
+                "model_",
+                "parse_",
+                "from_orm",
+                "construct",
+                "schema",
+                "validate",
+                "update_forward_refs",
+                "copy",
+                "dict",
+                "json",
+            )
             data = {
                 key: value
                 for key, value in data.items()
@@ -322,7 +333,6 @@ class SettingsModel(_make_pydantic_base()):
 
 def _rtn_models_module():
     from typing import Any
-    from pydantic import Field
 
     mod = types.ModuleType("RTN.models")
     PyBase = _make_pydantic_base()
@@ -407,4 +417,3 @@ def _install_rtn_stub():
 
 
 _install_rtn_stub()
-

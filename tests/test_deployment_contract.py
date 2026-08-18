@@ -21,9 +21,7 @@ class DeploymentContractTests(unittest.TestCase):
 
         self.assertEqual(dockerfile.count("FROM python:3.13-slim-trixie"), 2)
         self.assertIn("FROM ghcr.io/astral-sh/uv:0.11.32 AS uv", dockerfile)
-        self.assertIn(
-            "FROM rust:1.97.1-slim-trixie AS rust-toolchain", dockerfile
-        )
+        self.assertIn("FROM rust:1.97.1-slim-trixie AS rust-toolchain", dockerfile)
         self.assertNotRegex(dockerfile, r"(?m)^FROM\s+\S*alpine")
         self.assertIn("DEBIAN_FRONTEND=noninteractive apt-get install", dockerfile)
         self.assertIn("--no-install-recommends", dockerfile)

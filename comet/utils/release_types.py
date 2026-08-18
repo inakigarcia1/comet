@@ -5,12 +5,12 @@ and consumed by `services.user_filters.ReleaseTypeFilter`. Classification comes
 from RTN's parsed payload (`parsed.rip`); only the `"unknown"` bucket is added
 for releases RTN cannot attribute.
 """
+
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 from RTN import ParsedData
-
 
 RELEASE_TYPE_KEYS: tuple[str, ...] = (
     "remux",
@@ -116,6 +116,5 @@ def matches_release_filters(
 def release_type_choices() -> list[dict[str, str]]:
     """UI-ready list of available release types for the configure page."""
     return [
-        {"key": key, "label": RELEASE_TYPE_LABELS[key]}
-        for key in RELEASE_TYPE_KEYS
+        {"key": key, "label": RELEASE_TYPE_LABELS[key]} for key in RELEASE_TYPE_KEYS
     ]

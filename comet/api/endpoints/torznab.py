@@ -16,7 +16,11 @@ from comet.metadata.episode_index import EpisodeIndexService
 from comet.metadata.imdb import resolve_imdb_title
 from comet.metadata.tmdb import TMDBApi
 from comet.observability import metrics
-from comet.services.media_search import MediaSearchResult, MediaSearchStatus, search_media
+from comet.services.media_search import (
+    MediaSearchResult,
+    MediaSearchStatus,
+    search_media,
+)
 from comet.services.trackers import trackers as global_trackers
 from comet.utils.cache import CachePolicies, cached_response
 from comet.utils.http_client import http_client_manager
@@ -38,9 +42,7 @@ _YEAR = re.compile(r"[0-9]{4}", re.ASCII)
 _SEASON = re.compile(r"[sS]?([0-9]{1,4})", re.ASCII)
 _EPISODE = re.compile(r"[eE]?([0-9]{1,6})", re.ASCII)
 _DAILY_EPISODE = re.compile(r"([0-9]{1,2})/([0-9]{1,2})", re.ASCII)
-_TITLE_SCOPE = re.compile(
-    r"(?i)(?:[ ._-]+)S([0-9]{1,4})(?:E([0-9]{1,6}))?\s*$"
-)
+_TITLE_SCOPE = re.compile(r"(?i)(?:[ ._-]+)S([0-9]{1,4})(?:E([0-9]{1,6}))?\s*$")
 _INFO_HASH = re.compile(r"[0-9a-fA-F]{40}", re.ASCII)
 _ILLEGAL_XML_CHARACTER = re.compile(
     "[^\t\n\r\x20-\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]"
@@ -88,9 +90,7 @@ class SearchTarget:
 
 
 def _clean_xml(value: object) -> str:
-    return _ILLEGAL_XML_CHARACTER.sub(
-        "", value if type(value) is str else str(value)
-    )
+    return _ILLEGAL_XML_CHARACTER.sub("", value if type(value) is str else str(value))
 
 
 def _escape(value: object) -> str:
@@ -251,9 +251,7 @@ async def _resolve_daily_episode(
         air_date = date(year, month, day).isoformat()
     except ValueError as exc:
         raise TorznabProtocolError(201, "Invalid parameter") from exc
-    return await EpisodeIndexService(session).get_episode_by_air_date(
-        imdb_id, air_date
-    )
+    return await EpisodeIndexService(session).get_episode_by_air_date(imdb_id, air_date)
 
 
 async def resolve_search_target(
@@ -397,9 +395,11 @@ async def find_recent_target(
             continue
 
         scoped_series = season is not None or episode is not None
-        locally_series = scoped_series or torrent_row["season"] is not None or torrent_row[
-            "episode"
-        ] is not None
+        locally_series = (
+            scoped_series
+            or torrent_row["season"] is not None
+            or torrent_row["episode"] is not None
+        )
         if locally_series:
             if constraint.media_type == "movie":
                 continue
@@ -438,18 +438,14 @@ def _encoded_trackers(candidates: tuple[str, ...]) -> str:
     Cached because a feed reuses the same list across every one of its items.
     """
     trackers = dict.fromkeys(
-        tracker
-        for tracker in map(_valid_tracker, candidates)
-        if tracker is not None
+        tracker for tracker in map(_valid_tracker, candidates) if tracker is not None
     )
     return "".join(f"&tr={quote(tracker, safe='')}" for tracker in trackers)
 
 
 def build_magnet(info_hash: str, title: str, torrent: dict) -> str:
     sources = torrent.get("sources")
-    trackers = _encoded_trackers(
-        tuple(sources) if sources else tuple(global_trackers)
-    )
+    trackers = _encoded_trackers(tuple(sources) if sources else tuple(global_trackers))
     return (
         f"magnet:?xt={quote(f'urn:btih:{info_hash}', safe=':')}"
         f"&dn={quote(_clean_xml(title), safe='')}{trackers}"
@@ -503,11 +499,7 @@ def _serialize_items(
 
         info_hash = raw_info_hash.lower()
         raw_size = torrent.get("size")
-        size = (
-            raw_size
-            if type(raw_size) is int and raw_size >= 0
-            else 0
-        )
+        size = raw_size if type(raw_size) is int and raw_size >= 0 else 0
         # Magnets are percent-encoded ASCII, so "&" is their only XML-significant
         # character and no illegal-character sweep is needed.
         magnet = build_magnet(info_hash, title, torrent).replace("&", "&amp;")
@@ -532,13 +524,9 @@ def _serialize_items(
             fragments.append(_torznab_attribute("seeders", seeders))
         if media_type == "series":
             if result.search_season is not None:
-                fragments.append(
-                    _torznab_attribute("season", result.search_season)
-                )
+                fragments.append(_torznab_attribute("season", result.search_season))
             if result.search_episode is not None:
-                fragments.append(
-                    _torznab_attribute("episode", result.search_episode)
-                )
+                fragments.append(_torznab_attribute("episode", result.search_episode))
 
         parsed = torrent.get("parsed")
         if parsed is not None:
@@ -616,9 +604,7 @@ def serialize_caps() -> bytes:
 
 
 def serialize_error(code: int, description: str) -> bytes:
-    return _xml_document(
-        f'<error code="{code}" description="{_escape(description)}"/>'
-    )
+    return _xml_document(f'<error code="{code}" description="{_escape(description)}"/>')
 
 
 def _xml_response(
@@ -709,11 +695,7 @@ async def torznab_api(
             return _feed_response(request)[0]
 
         session = await http_client_manager.get_session()
-        if (
-            query.function == "search"
-            and query.imdb_id is None
-            and not query.query
-        ):
+        if query.function == "search" and query.imdb_id is None and not query.query:
             if query.season is not None or query.episode is not None:
                 raise TorznabProtocolError(200, "Missing parameter")
             target = await find_recent_target(constraint, session)

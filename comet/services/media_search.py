@@ -195,10 +195,11 @@ async def check_multi_service_availability(
     async def check_service(entry):
         service = entry["service"]
         debrid_instance = DebridService(service, entry["apiKey"], "")
-        cached_hashes, torrent_updates = (
-            await debrid_instance.check_existing_availability(
-                info_hashes, season, episode, media_scope, torrents
-            )
+        (
+            cached_hashes,
+            torrent_updates,
+        ) = await debrid_instance.check_existing_availability(
+            info_hashes, season, episode, media_scope, torrents
         )
         return service, cached_hashes, torrent_updates
 
@@ -247,7 +248,9 @@ async def get_and_cache_multi_service_availability(
     if not info_hashes or not debrid_entries:
         return service_cache_status, errors
 
-    seeders_map = {info_hash: torrents[info_hash]["seeders"] for info_hash in info_hashes}
+    seeders_map = {
+        info_hash: torrents[info_hash]["seeders"] for info_hash in info_hashes
+    }
     tracker_map = {
         info_hash: torrents[info_hash]["tracker"] for info_hash in info_hashes
     }
@@ -270,21 +273,22 @@ async def get_and_cache_multi_service_availability(
         for entry in entries:
             try:
                 debrid_instance = DebridService(service, entry["apiKey"], ip)
-                cached_hashes, torrent_updates = (
-                    await debrid_instance.get_and_cache_availability(
-                        session,
-                        service_info_hashes,
-                        seeders_map,
-                        tracker_map,
-                        sources_map,
-                        torrents,
-                        media_id,
-                        media_only_id,
-                        season,
-                        episode,
-                        media_scope,
-                        target_air_date=target_air_date,
-                    )
+                (
+                    cached_hashes,
+                    torrent_updates,
+                ) = await debrid_instance.get_and_cache_availability(
+                    session,
+                    service_info_hashes,
+                    seeders_map,
+                    tracker_map,
+                    sources_map,
+                    torrents,
+                    media_id,
+                    media_only_id,
+                    season,
+                    episode,
+                    media_scope,
+                    target_air_date=target_air_date,
                 )
                 return service, cached_hashes, torrent_updates, None
             except DebridAuthError as error:
@@ -338,7 +342,7 @@ async def search_media(
     config: Mapping[str, Any],
     ip: str,
     add_background_task: BackgroundTaskAdder,
-    duration_minutes: float | int | None = None,
+    duration_minutes: float | None = None,
 ) -> MediaSearchResult:
     if media_type not in {"movie", "series"} or "tmdb:" in media_id:
         return MediaSearchResult(MediaSearchStatus.INVALID)
@@ -515,8 +519,12 @@ async def search_media(
     initial_info_hashes = set(torrent_manager.torrents)
     logger.log("SCRAPER", f"📦 Found cached torrents: {torrent_count}")
 
-    if user_filters.filename.is_active and torrent_count and has_include_but_no_match(
-        torrent_manager.torrents.values(), user_filters.filename
+    if (
+        user_filters.filename.is_active
+        and torrent_count
+        and has_include_but_no_match(
+            torrent_manager.torrents.values(), user_filters.filename
+        )
     ):
         logger.log(
             "FILTER",
@@ -526,9 +534,8 @@ async def search_media(
 
     cache_manager = CacheStateManager(media_id)
     cache_result = await cache_manager.check_and_decide(torrent_count)
-    force_scrape_now = (
-        not torrent_manager.primary_cached
-        or getattr(torrent_manager, "_force_filename_refresh", False)
+    force_scrape_now = not torrent_manager.primary_cached or getattr(
+        torrent_manager, "_force_filename_refresh", False
     )
     lock_acquired = cache_result.lock_acquired
     sort_mixed = is_torrent_only or config["sortCachedUncachedTogether"]
@@ -666,9 +673,7 @@ async def search_media(
             search_episode,
             media_scope,
         )
-        merge_service_cache_status(
-            service_cache_status, existing_service_cache_status
-        )
+        merge_service_cache_status(service_cache_status, existing_service_cache_status)
         merge_service_cache_status(
             verified_service_cache_status, existing_service_cache_status
         )
@@ -703,24 +708,23 @@ async def search_media(
             for info_hash, torrent in torrent_manager.torrents.items()
             if info_hash in debrid_refresh_hashes
         }
-        fresh_service_cache_status, debrid_errors = (
-            await get_and_cache_multi_service_availability(
-                session,
-                debrid_entries,
-                torrents_to_check,
-                media_id,
-                media_only_id,
-                search_season,
-                search_episode,
-                media_scope,
-                ip,
-                target_air_date=target_air_date,
-                known_cache_status=service_cache_status,
-            )
+        (
+            fresh_service_cache_status,
+            debrid_errors,
+        ) = await get_and_cache_multi_service_availability(
+            session,
+            debrid_entries,
+            torrents_to_check,
+            media_id,
+            media_only_id,
+            search_season,
+            search_episode,
+            media_scope,
+            ip,
+            target_air_date=target_air_date,
+            known_cache_status=service_cache_status,
         )
-        merge_service_cache_status(
-            service_cache_status, fresh_service_cache_status
-        )
+        merge_service_cache_status(service_cache_status, fresh_service_cache_status)
 
     for service in dict.fromkeys(entry["service"] for entry in debrid_entries):
         cached_count = sum(

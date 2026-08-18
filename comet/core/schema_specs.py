@@ -342,9 +342,7 @@ TORRENTS_TABLE_SPEC = ManagedTableSpec(
             column_sql="updated_at REAL",
             legacy_name="timestamp",
         ),
-        LegacyColumnMigration(
-            "is_manual", "is_manual INTEGER NOT NULL DEFAULT 0"
-        ),
+        LegacyColumnMigration("is_manual", "is_manual INTEGER NOT NULL DEFAULT 0"),
         LegacyColumnMigration(
             "manual_share_cometnet",
             "manual_share_cometnet INTEGER NOT NULL DEFAULT 0",

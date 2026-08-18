@@ -2,7 +2,6 @@
 is not available (e.g. CI workers without MSVC build tools). When the real
 RTN is present, this is a no-op.
 """
-import sys
 
 
 def _ensure_rtn_stub():
