@@ -76,6 +76,7 @@ class TorrentManager:
         target_air_date: str | None = None,
         reject_unknown_episode_files: bool = False,
         media_scope: MediaScope | None = None,
+        user_filters=None,
     ):
         self.media_type = media_type
         self.media_id = media_full_id
@@ -101,6 +102,7 @@ class TorrentManager:
         )
         self.target_air_date = target_air_date
         self.reject_unknown_episode_files = reject_unknown_episode_files
+        self.user_filters = user_filters
 
         self.seen_hashes = set()
         self.torrents = {}
@@ -108,6 +110,28 @@ class TorrentManager:
         self.ranked_torrents = {}
         self.primary_cached = False
         self.live_result_timestamp = time.time()
+
+    def _scope_matches_torrent(self, torrent: dict) -> bool:
+        """Return True if the torrent's parsed payload matches the requested
+        media scope (movie / series / season / episode)."""
+        parsed = torrent.get("parsed")
+        if parsed is None:
+            return True
+        try:
+            parsed = ensure_multi_language(parsed)
+        except Exception:
+            return True
+        try:
+            return self.media_scope.matches_parsed(
+                parsed,
+                self.search_season,
+                self.search_episode,
+                target_air_date=self.target_air_date,
+                reject_unknown_episode_files=self.reject_unknown_episode_files,
+                scope_is_known=True,
+            )
+        except Exception:
+            return True
 
     def _matches_requested_scope(
         self,
@@ -267,7 +291,7 @@ class TorrentManager:
                 continue
 
             info_hash = row["info_hash"]
-            self.torrents[info_hash] = {
+            torrent_entry = {
                 "fileIndex": row["file_index"],
                 "title": row["title"],
                 "seeders": row["seeders"],
@@ -277,6 +301,17 @@ class TorrentManager:
                 "parsed": parsed_data,
                 "updatedAt": row["updated_at"],
             }
+            if self.user_filters is not None and self.user_filters.any_active():
+                scope_ok = self._matches_requested_scope(
+                    parsed_data,
+                    reject_unknown_override=reject_unknown_override,
+                    scope_is_known=True,
+                )
+                if not self.user_filters.filter_torrent(
+                    torrent_entry, scope_matches=scope_ok
+                ):
+                    continue
+            self.torrents[info_hash] = torrent_entry
 
     def _append_cache_file_infos(self, file_infos: list[dict], torrent: dict):
         parsed = torrent["parsed"]
@@ -383,6 +418,8 @@ class TorrentManager:
                 self.media_type,
                 self.aliases,
                 self.remove_adult_content,
+                self.user_filters,
+                self._scope_matches_torrent,
             )
             for i in range(0, len(new_torrents), chunk_size)
         ]

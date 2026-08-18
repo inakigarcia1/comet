@@ -957,6 +957,11 @@ async def _migration_imdb_title_lookup(ctx: MigrationContext):
     return True
 
 
+async def _migration_torrents_is_manual(ctx: MigrationContext):
+    await _ensure_managed_table(ctx, TORRENTS_TABLE_SPEC)
+    return True
+
+
 async def _migration_tmdb_title_aliases(ctx: MigrationContext):
     await _ensure_managed_table(ctx, MEDIA_METADATA_CACHE_TABLE_SPEC)
     await ctx.database.execute(
@@ -1018,4 +1023,5 @@ MIGRATIONS = [
         _migration_media_demand_scrape_coverage,
     ),
     ("2026072701_imdb_title_lookup", _migration_imdb_title_lookup),
+    ("2026081801_torrents_is_manual", _migration_torrents_is_manual),
 ]

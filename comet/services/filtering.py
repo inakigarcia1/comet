@@ -295,7 +295,15 @@ def _do_parse_and_cache(
 
 
 def filter_worker(
-    torrents, title, year, year_end, media_type, aliases, remove_adult_content
+    torrents,
+    title,
+    year,
+    year_end,
+    media_type,
+    aliases,
+    remove_adult_content,
+    user_filters=None,
+    scope_matches=None,
 ):
     results = []
     matcher = TitleMatcher(title, year, year_end, media_type, aliases)
@@ -385,5 +393,17 @@ def filter_worker(
             continue
 
         torrent["parsed"] = parsed
+
+        if user_filters is not None and user_filters.any_active():
+            scope_ok = True
+            if scope_matches is not None:
+                try:
+                    scope_ok = bool(scope_matches(torrent))
+                except Exception:
+                    scope_ok = True
+            if not user_filters.filter_torrent(torrent, scope_matches=scope_ok):
+                _log_exclusion(f"🎛️ Rejected (User Filter) | {torrent_title}")
+                continue
+
         results.append(torrent)
     return results

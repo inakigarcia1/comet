@@ -736,7 +736,7 @@ async def _perform_startup_cleanup(current_time: float):
     if settings.TORRENT_CACHE_TTL >= 0:
         await _delete_where(
             "torrents",
-            "updated_at < :min_timestamp",
+            "updated_at < :min_timestamp AND is_manual = 0",
             {"min_timestamp": current_time - settings.TORRENT_CACHE_TTL},
         )
 

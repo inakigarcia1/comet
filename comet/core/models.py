@@ -1273,6 +1273,26 @@ class ConfigModel(BaseModel):
     maxResultsPerResolution: int | None = 0
     maxSize: float | None = 0
 
+    # Per-type size overrides. 0 = use the legacy global maxSize fallback.
+    maxSizeMovie: float | None = 0
+    maxSizeSeries: float | None = 0
+
+    # Bitrate filters in Mbps. 0 = disabled. Applied only when stream
+    # request supplies ?durationMinutes.
+    minBitrateMbps: float | None = 0
+    maxBitrateMbps: float | None = 0
+
+    # Filename/release-substring filters (case-insensitive). Empty list = no
+    # constraint. Exclude wins over include.
+    filenameInclude: list[str] | None = []
+    filenameExclude: list[str] | None = []
+
+    # Release type allow/block. Empty allow = accept all non-blocked. Block
+    # wins over allow. Categories are normalized through
+    # comet.utils.release_types.classify_release.
+    releaseTypesAllowlist: list[str] | None = []
+    releaseTypesBlocklist: list[str] | None = []
+
     # Legacy single-service fields
     debridService: str | None = "torrent"
     debridApiKey: str | None = ""
@@ -1298,12 +1318,48 @@ class ConfigModel(BaseModel):
         v = max(v, 0)
         return v
 
-    @field_validator("maxSize")
+    @field_validator("maxSize", "maxSizeMovie", "maxSizeSeries")
     def check_max_size(cls, v):
-        if not isinstance(v, float):
+        if not isinstance(v, (int, float)):
             v = 0
 
-        v = max(v, 0)
+        v = max(float(v), 0.0)
+        return v
+
+    @field_validator("minBitrateMbps", "maxBitrateMbps")
+    def check_bitrate_mbps(cls, v):
+        if not isinstance(v, (int, float)):
+            v = 0
+
+        v = max(float(v), 0.0)
+        return v
+
+    @field_validator("maxBitrateMbps")
+    def check_bitrate_range(cls, v, info):
+        values = info.data
+        min_value = values.get("minBitrateMbps")
+        if (
+            isinstance(v, (int, float))
+            and isinstance(min_value, (int, float))
+            and v > 0
+            and min_value > 0
+            and v < min_value
+        ):
+            raise ValueError("maxBitrateMbps must be >= minBitrateMbps")
+        return v
+
+    @field_validator(
+        "filenameInclude",
+        "filenameExclude",
+        "releaseTypesAllowlist",
+        "releaseTypesBlocklist",
+        mode="before",
+    )
+    def normalize_string_list(cls, v):
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return [str(item) for item in v if isinstance(item, str) and item]
         return v
 
     @field_validator("debridService")
@@ -1342,7 +1398,18 @@ web_config = {
         "tracker",
         "languages",
     ],
+    "releaseTypes": [],
 }
+
+
+def _populate_web_release_types():
+    # Imported lazily so `models.py` stays importable without the new utility.
+    from comet.utils.release_types import release_type_choices
+
+    web_config["releaseTypes"] = release_type_choices()
+
+
+_populate_web_release_types()
 
 
 def _build_database_instance(raw_url: str):

@@ -489,6 +489,11 @@ def _merge_torrent_updates(
         existing.sources = _dedupe_strings([*existing.sources, *incoming.sources])
     existing.parsed = _merge_parsed_payloads(existing.parsed, incoming.parsed)
     existing.from_cometnet = existing.from_cometnet and incoming.from_cometnet
+    existing.is_manual = existing.is_manual or incoming.is_manual
+    if incoming.is_manual:
+        existing.manual_share_cometnet = (
+            existing.manual_share_cometnet or incoming.manual_share_cometnet
+        )
     existing.attempts = max(existing.attempts, incoming.attempts)
     return existing
 
@@ -508,6 +513,8 @@ def _construct_torrent_update(
     parsed: dict,
     from_cometnet: bool,
     attempts: int = 0,
+    is_manual: bool = False,
+    manual_share_cometnet: bool = False,
 ) -> "_TorrentUpdate":
     season_norm = normalize_scope_value(season)
     episode_norm = normalize_scope_value(episode)
@@ -528,6 +535,8 @@ def _construct_torrent_update(
     item.season_norm = season_norm
     item.episode_norm = episode_norm
     item.row_key = (media_id, info_hash, season_norm, episode_norm)
+    item.is_manual = is_manual
+    item.manual_share_cometnet = manual_share_cometnet
     return item
 
 
@@ -538,6 +547,8 @@ def _build_torrent_update_from_source(
     from_cometnet: bool,
     sources_cache: dict[int, list[str]] | None = None,
     parsed_cache: dict[int, dict] | None = None,
+    is_manual: bool = False,
+    manual_share_cometnet: bool = False,
 ) -> "_TorrentUpdate | None":
     info_hash = _normalize_valid_info_hash(source.get("info_hash"))
     title = source.get("title")
@@ -567,6 +578,8 @@ def _build_torrent_update_from_source(
             parsed_cache,
         ),
         from_cometnet=from_cometnet,
+        is_manual=is_manual,
+        manual_share_cometnet=manual_share_cometnet,
     )
 
 
@@ -595,7 +608,12 @@ def _build_torrent_update_from_metadata(
 
 
 def _iter_torrent_updates_from_file_infos(
-    file_infos: Iterable[dict], *, media_id: str, from_cometnet: bool
+    file_infos: Iterable[dict],
+    *,
+    media_id: str,
+    from_cometnet: bool,
+    is_manual: bool = False,
+    manual_share_cometnet: bool = False,
 ) -> Iterator["_TorrentUpdate"]:
     sources_cache = {}
     parsed_cache = {}
@@ -606,6 +624,8 @@ def _iter_torrent_updates_from_file_infos(
             from_cometnet=from_cometnet,
             sources_cache=sources_cache,
             parsed_cache=parsed_cache,
+            is_manual=is_manual,
+            manual_share_cometnet=manual_share_cometnet,
         )
         if item is not None:
             yield item
@@ -629,6 +649,8 @@ class _TorrentUpdate:
     season_norm: int = field(init=False)
     episode_norm: int = field(init=False)
     row_key: tuple[str, str, int, int] = field(init=False)
+    is_manual: bool = False
+    manual_share_cometnet: bool = False
 
     def to_broadcast_metadata(self, updated_at: float) -> TorrentMetadata | None:
         try:
@@ -1087,7 +1109,12 @@ class TorrentUpdateQueue:
         return not self._stopping and isinstance(media_id, str) and bool(media_id)
 
     async def add_torrent_info(
-        self, file_info: dict, media_id: str | None = None, from_cometnet: bool = False
+        self,
+        file_info: dict,
+        media_id: str | None = None,
+        from_cometnet: bool = False,
+        is_manual: bool = False,
+        manual_share_cometnet: bool = False,
     ):
         if not self._can_accept_media_id(media_id):
             return
@@ -1097,6 +1124,8 @@ class TorrentUpdateQueue:
                 media_id=media_id,
                 source=file_info,
                 from_cometnet=from_cometnet,
+                is_manual=is_manual,
+                manual_share_cometnet=manual_share_cometnet,
             )
         )
 
@@ -1105,6 +1134,8 @@ class TorrentUpdateQueue:
         file_infos: list[dict],
         media_id: str | None = None,
         from_cometnet: bool = False,
+        is_manual: bool = False,
+        manual_share_cometnet: bool = False,
     ):
         if not file_infos or not self._can_accept_media_id(media_id):
             return
@@ -1114,6 +1145,8 @@ class TorrentUpdateQueue:
                 file_infos,
                 media_id=media_id,
                 from_cometnet=from_cometnet,
+                is_manual=is_manual,
+                manual_share_cometnet=manual_share_cometnet,
             )
         )
 
@@ -1241,6 +1274,7 @@ class TorrentUpdateQueue:
             metadata
             for item in batch_items
             if not item.from_cometnet
+            and (not item.is_manual or item.manual_share_cometnet)
             and (metadata := item.to_broadcast_metadata(updated_at)) is not None
         ]
         if not metadata_batch:
@@ -1686,6 +1720,59 @@ async def _execute_batched_upsert(rows: list[_TorrentUpdate], *, updated_at: flo
                     parsed_json_cache=parsed_json_cache,
                 ),
             )
+
+    await _apply_manual_flags(rows)
+
+
+_MANUAL_FLAG_COLUMNS_PER_ROW = 6
+_MANUAL_FLAG_PARAMS_PER_ROW = 4
+
+
+def _build_manual_flag_statement(row_count: int) -> str:
+    return (
+        "UPDATE torrents SET is_manual = 1, manual_share_cometnet = :msc "
+        "WHERE media_id = :media_id AND info_hash = :info_hash "
+        "AND season_norm = :season_norm AND episode_norm = :episode_norm"
+    )
+
+
+def _build_manual_flag_params(rows: list[_TorrentUpdate]) -> dict:
+    params: dict = {}
+    for index, item in enumerate(rows):
+        params[f"media_id_{index}"] = item.media_id
+        params[f"info_hash_{index}"] = item.info_hash
+        params[f"season_norm_{index}"] = item.season_norm
+        params[f"episode_norm_{index}"] = item.episode_norm
+        params[f"msc_{index}"] = 1 if item.manual_share_cometnet else 0
+    return params
+
+
+async def _apply_manual_flags(rows: list[_TorrentUpdate]) -> None:
+    manual_rows = [item for item in rows if item.is_manual]
+    if not manual_rows:
+        return
+
+    max_rows = max(
+        1,
+        (DB_MAX_PARAMETERS - 1) // _MANUAL_FLAG_PARAMS_PER_ROW,
+    )
+    for start in range(0, len(manual_rows), max_rows):
+        chunk = manual_rows[start : start + max_rows]
+        # Build a multi-statement SQL with bound parameters per row.
+        statements = []
+        params: dict = {}
+        for index, item in enumerate(chunk):
+            statements.append(
+                f"UPDATE torrents SET is_manual = 1, manual_share_cometnet = :msc_{index} "
+                f"WHERE media_id = :media_id_{index} AND info_hash = :info_hash_{index} "
+                f"AND season_norm = :season_norm_{index} AND episode_norm = :episode_norm_{index}"
+            )
+            params[f"msc_{index}"] = 1 if item.manual_share_cometnet else 0
+            params[f"media_id_{index}"] = item.media_id
+            params[f"info_hash_{index}"] = item.info_hash
+            params[f"season_norm_{index}"] = item.season_norm
+            params[f"episode_norm_{index}"] = item.episode_norm
+        await database.execute("; ".join(statements), params)
 
 
 async def _execute_isolated_batched_upsert(

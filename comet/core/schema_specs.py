@@ -316,6 +316,8 @@ TORRENTS_TABLE_SPEC = ManagedTableSpec(
             sources_json TEXT NOT NULL DEFAULT '[]',
             parsed_json TEXT NOT NULL,
             updated_at REAL NOT NULL,
+            is_manual INTEGER NOT NULL DEFAULT 0,
+            manual_share_cometnet INTEGER NOT NULL DEFAULT 0,
             CHECK ((season IS NULL AND season_norm = -1) OR season = season_norm),
             CHECK ((episode IS NULL AND episode_norm = -1) OR episode = episode_norm)
         )
@@ -339,6 +341,13 @@ TORRENTS_TABLE_SPEC = ManagedTableSpec(
             column_name="updated_at",
             column_sql="updated_at REAL",
             legacy_name="timestamp",
+        ),
+        LegacyColumnMigration(
+            "is_manual", "is_manual INTEGER NOT NULL DEFAULT 0"
+        ),
+        LegacyColumnMigration(
+            "manual_share_cometnet",
+            "manual_share_cometnet INTEGER NOT NULL DEFAULT 0",
         ),
     ),
     index_sql=(

@@ -1,7 +1,7 @@
 from collections import defaultdict
 from urllib.parse import quote
 
-from fastapi import APIRouter, BackgroundTasks, Request
+from fastapi import APIRouter, BackgroundTasks, Query, Request
 
 from comet.core.config_validation import config_check
 from comet.core.models import settings
@@ -197,6 +197,14 @@ async def stream(
     b64config: str | None = None,
     chilllink: bool = False,
     kodi: bool = False,
+    duration_minutes: float | None = Query(
+        default=None,
+        ge=1,
+        description=(
+            "Optional runtime duration in minutes. When provided, the bitrate "
+            "filter (min/max Mbps) is applied. 0 or negative disables the filter."
+        ),
+    ),
 ):
     if media_type not in ["movie", "series"]:
         return _build_stream_response(request, {"streams": []}, is_empty=True)
@@ -227,7 +235,14 @@ async def stream(
     use_account_scrape = bool(
         debrid_entries and config["scrapeDebridAccountTorrents"]
     )
-    response_cache_policy = CachePolicies.no_cache() if use_account_scrape else None
+    bitrate_filter_active = duration_minutes is not None and (
+        config.get("minBitrateMbps") or config.get("maxBitrateMbps")
+    )
+    response_cache_policy = (
+        CachePolicies.no_cache()
+        if use_account_scrape or bitrate_filter_active
+        else None
+    )
     stream_cache_state = "unknown"
     stream_client = "kodi" if kodi else ("chilllink" if chilllink else "stremio")
 
@@ -253,6 +268,7 @@ async def stream(
         config,
         get_client_ip(request),
         background_tasks.add_task,
+        duration_minutes=duration_minutes,
     )
     stream_cache_state = search_result.cache_state
 

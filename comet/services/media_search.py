@@ -338,6 +338,7 @@ async def search_media(
     config: Mapping[str, Any],
     ip: str,
     add_background_task: BackgroundTaskAdder,
+    duration_minutes: float | int | None = None,
 ) -> MediaSearchResult:
     if media_type not in {"movie", "series"} or "tmdb:" in media_id:
         return MediaSearchResult(MediaSearchStatus.INVALID)
@@ -483,6 +484,9 @@ async def search_media(
             )
 
     remove_adult_content = settings.REMOVE_ADULT_CONTENT and config["removeTrash"]
+    from comet.services.user_filters import build_user_filters, has_include_but_no_match
+
+    user_filters = build_user_filters(config, duration_minutes=duration_minutes)
     torrent_manager = TorrentManager(
         media_type,
         media_id,
@@ -501,6 +505,7 @@ async def search_media(
         target_air_date=target_air_date,
         reject_unknown_episode_files=reject_unknown_episode_files,
         media_scope=media_scope,
+        user_filters=user_filters,
     )
 
     await torrent_manager.get_cached_torrents()
@@ -510,9 +515,21 @@ async def search_media(
     initial_info_hashes = set(torrent_manager.torrents)
     logger.log("SCRAPER", f"📦 Found cached torrents: {torrent_count}")
 
+    if user_filters.filename.is_active and torrent_count and has_include_but_no_match(
+        torrent_manager.torrents.values(), user_filters.filename
+    ):
+        logger.log(
+            "FILTER",
+            "🔁 filenameInclude has no match in cache; triggering one live refresh",
+        )
+        torrent_manager._force_filename_refresh = True
+
     cache_manager = CacheStateManager(media_id)
     cache_result = await cache_manager.check_and_decide(torrent_count)
-    force_scrape_now = not torrent_manager.primary_cached
+    force_scrape_now = (
+        not torrent_manager.primary_cached
+        or getattr(torrent_manager, "_force_filename_refresh", False)
+    )
     lock_acquired = cache_result.lock_acquired
     sort_mixed = is_torrent_only or config["sortCachedUncachedTogether"]
     account_snapshot_ready = False
@@ -718,11 +735,14 @@ async def search_media(
         )
 
     initial_torrent_count = len(torrent_manager.torrents)
+    from comet.services.user_filters import compute_effective_max_size
+
+    effective_max_size = compute_effective_max_size(config, media_type)
     await torrent_manager.rank_torrents(
         config["rtnSettings"],
         config["rtnRanking"],
         0,
-        config["maxSize"],
+        effective_max_size,
         config["removeTrash"],
     )
     logger.log(

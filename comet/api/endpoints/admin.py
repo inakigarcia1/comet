@@ -7,9 +7,21 @@ from fastapi import APIRouter, Cookie, Form, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+from comet.api.models.manual_torrent import (
+    ManualTorrentBulkIn,
+    ManualTorrentDelete,
+    ManualTorrentIn,
+)
 from comet.background_scraper.worker import background_scraper
 from comet.core.logger import log_capture, logger
 from comet.core.models import database, settings
+from comet.services.admin_manual_torrents import (
+    delete_manual,
+    insert_manual,
+    insert_manual_bulk,
+    list_manual,
+    wait_for_manual_flush,
+)
 from comet.services.bandwidth import bandwidth_monitor
 from comet.utils.formatting import format_bytes
 from comet.utils.signed_session import (
@@ -670,5 +682,124 @@ async def admin_background_scraper_requeue_dead(
             "success": True,
             "message": "Dead background scraper entries requeued",
             "requeued": requeued,
+        }
+    )
+
+
+@router.post(
+    "/admin/api/torrents/manual",
+    tags=["Admin"],
+    summary="Insert Manual Torrent",
+    description=(
+        "Persist a single manual torrent into the torrents cache. The "
+        "torrent flows through the same TorrentUpdateQueue as scraper-found "
+        "ones but is flagged `is_manual=1` so it survives the TTL cleanup and "
+        "is skipped by CometNet unless `shareCometnet=true` is sent."
+    ),
+)
+async def admin_manual_torrent_create(
+    payload: ManualTorrentIn,
+    admin_session: str = Cookie(None, description="Admin session token"),
+):
+    require_admin_auth(admin_session)
+    try:
+        resolved = payload.resolve()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    await insert_manual(resolved)
+    await wait_for_manual_flush(timeout=2.0)
+    return JSONResponse(
+        {
+            "success": True,
+            "mediaId": resolved.mediaId,
+            "infoHash": resolved.infoHash,
+            "shareCometnet": resolved.shareCometnet,
+        }
+    )
+
+
+@router.post(
+    "/admin/api/torrents/manual/bulk",
+    tags=["Admin"],
+    summary="Bulk Insert Manual Torrents",
+    description=(
+        "Persist up to 500 manual torrents in a single request. Each entry is "
+        "validated independently; invalid entries are reported in `rejected` "
+        "with the original list index."
+    ),
+)
+async def admin_manual_torrent_bulk(
+    payload: ManualTorrentBulkIn,
+    admin_session: str = Cookie(None, description="Admin session token"),
+):
+    require_admin_auth(admin_session)
+    resolved_items: list[ManualTorrentIn] = []
+    rejected: list[dict] = []
+    for index, item in enumerate(payload.torrents):
+        try:
+            resolved_items.append(item.resolve())
+        except ValueError as exc:
+            rejected.append({"index": index, "error": str(exc)})
+
+    inserted, _, rejected_post = await insert_manual_bulk(resolved_items)
+    await wait_for_manual_flush(timeout=5.0)
+    return JSONResponse(
+        {
+            "success": True,
+            "total": len(payload.torrents),
+            "inserted": inserted,
+            "rejected": rejected + rejected_post,
+        }
+    )
+
+
+@router.get(
+    "/admin/api/torrents/manual",
+    tags=["Admin"],
+    summary="List Manual Torrents",
+    description="Lists manual torrents with optional mediaId/infoHash filters.",
+)
+async def admin_manual_torrent_list(
+    media_id: str | None = None,
+    info_hash: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    admin_session: str = Cookie(None, description="Admin session token"),
+):
+    require_admin_auth(admin_session)
+    rows = await list_manual(
+        media_id=media_id,
+        info_hash=info_hash,
+        limit=limit,
+        offset=offset,
+    )
+    return JSONResponse({"torrents": rows, "count": len(rows)})
+
+
+@router.delete(
+    "/admin/api/torrents/manual",
+    tags=["Admin"],
+    summary="Delete Manual Torrent",
+    description=(
+        "Deletes a single manual torrent by (media_id, info_hash, season, "
+        "episode). Non-manual torrents under the same scope are preserved."
+    ),
+)
+async def admin_manual_torrent_delete(
+    payload: ManualTorrentDelete,
+    admin_session: str = Cookie(None, description="Admin session token"),
+):
+    require_admin_auth(admin_session)
+    deleted = await delete_manual(
+        media_id=payload.mediaId,
+        info_hash=payload.infoHash,
+        season=payload.season,
+        episode=payload.episode,
+    )
+    return JSONResponse(
+        {
+            "success": True,
+            "deleted": deleted,
         }
     )
