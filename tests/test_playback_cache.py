@@ -7,6 +7,7 @@ from comet.api.endpoints.playback import (
     _decode_sources,
     _parse_playback_path,
     _resolve_playback_file_index,
+    _row_expected_size,
     _row_is_manual,
     _valid_download_url,
 )
@@ -122,3 +123,8 @@ class PlaybackCacheTests(unittest.IsolatedAsyncioTestCase):
             _resolve_playback_file_index("6", row, is_manual=False),
             "6",
         )
+
+    def test_expected_size_ignores_missing_or_zero(self):
+        self.assertEqual(_row_expected_size({"size": 816708071}), 816708071)
+        self.assertIsNone(_row_expected_size({"size": 0}))
+        self.assertIsNone(_row_expected_size(None))

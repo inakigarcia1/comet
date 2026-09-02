@@ -101,6 +101,24 @@ def _row_is_manual(row) -> bool:
         return False
 
 
+def _row_expected_size(row) -> int | None:
+    if row is None:
+        return None
+    size = None
+    if hasattr(row, "get"):
+        size = row.get("size")
+    else:
+        try:
+            size = row["size"]
+        except (KeyError, IndexError, TypeError):
+            size = None
+    try:
+        size = int(size)
+    except (TypeError, ValueError):
+        return None
+    return size if size > 0 else None
+
+
 def _resolve_playback_file_index(index: str, torrent_row, *, is_manual: bool) -> str:
     if index != "n" or not is_manual or torrent_row is None:
         return index
@@ -285,7 +303,9 @@ async def playback(
     )
 
     download_url = None
-    if cached_link:
+    # TorBox JSON "index" is a store file id, not torrent files[i]. A cached
+    # link keyed only by hash+season+episode can point at the wrong file.
+    if cached_link and index in (None, "", "n"):
         download_url = _valid_download_url(cached_link["download_url"])
 
     ip = get_client_ip(request)
@@ -299,7 +319,7 @@ async def playback(
             scope_params = build_scope_lookup_params(season, episode)
             torrent_data = await database.fetch_one(
                 """
-                SELECT sources_json, is_manual, file_index, media_id
+                SELECT sources_json, is_manual, file_index, media_id, size
                 FROM torrents
                 WHERE info_hash = :info_hash
                 AND media_id = :media_id
@@ -313,7 +333,7 @@ async def playback(
             if torrent_data is None:
                 torrent_data = await database.fetch_one(
                     """
-                    SELECT sources_json, is_manual, file_index, media_id
+                    SELECT sources_json, is_manual, file_index, media_id, size
                     FROM torrents
                     WHERE info_hash = :info_hash
                     AND media_id = :media_id
@@ -325,7 +345,7 @@ async def playback(
             if torrent_data is None:
                 torrent_data = await database.fetch_one(
                     """
-                    SELECT sources_json, is_manual, file_index, media_id
+                    SELECT sources_json, is_manual, file_index, media_id, size
                     FROM torrents
                     WHERE info_hash = :info_hash
                     ORDER BY is_manual DESC, updated_at DESC
@@ -336,7 +356,7 @@ async def playback(
         else:
             torrent_data = await database.fetch_one(
                 """
-                SELECT sources_json, is_manual, file_index, media_id
+                SELECT sources_json, is_manual, file_index, media_id, size
                 FROM torrents
                 WHERE info_hash = :info_hash
                 ORDER BY is_manual DESC, updated_at DESC
@@ -348,6 +368,7 @@ async def playback(
         sources = []
         context_media_id = media_id
         is_manual = _row_is_manual(torrent_data)
+        expected_size = _row_expected_size(torrent_data)
         trust_file_index = is_manual or index not in (None, "", "n")
         if torrent_data:
             sources = _decode_sources(torrent_data["sources_json"])
@@ -362,7 +383,7 @@ async def playback(
             "PLAYBACK",
             f"Resolving {hash} index={index!r} is_manual={is_manual} "
             f"trust_file_index={trust_file_index} media_id={context_media_id!r} "
-            f"season={season!r} episode={episode!r}",
+            f"season={season!r} episode={episode!r} size={expected_size!r}",
         )
 
         aliases = {}
@@ -410,6 +431,7 @@ async def playback(
                 sources,
                 aliases,
                 trust_file_index=trust_file_index,
+                expected_size=expected_size,
             )
         except DebridLinkGenerationError as error:
             logger.log(

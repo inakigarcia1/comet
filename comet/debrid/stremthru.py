@@ -1,4 +1,5 @@
 import asyncio
+import re
 from urllib.parse import quote, unquote
 
 import aiohttp
@@ -76,6 +77,11 @@ def _prepare_cached_torrents(responses, *, is_offcloud: bool):
     return prepared, filenames
 
 
+_SXXEYY = re.compile(r"(?i)s(\d{1,2})e(\d{1,2})")
+_TXNN = re.compile(r"(?i)(?:^|[^a-z0-9])t(\d{1,2})[-_. ]e?(\d{1,2})(?:[^0-9]|$)")
+_NXNN = re.compile(r"(?i)(?:^|[^a-z0-9])(\d{1,2})x(\d{1,2})(?:[^0-9]|$)")
+
+
 def _coerce_store_file_index(value) -> int | None:
     if value is None or value == -1:
         return None
@@ -85,23 +91,85 @@ def _coerce_store_file_index(value) -> int | None:
         return None
 
 
-def _pick_file_by_trusted_index(files, index: str) -> dict | None:
+def _store_file_basename(file: dict) -> str:
+    name = file.get("name") or file.get("path") or ""
+    if not isinstance(name, str) or not name:
+        return ""
+    return name.replace("\\", "/").rsplit("/", 1)[-1]
+
+
+def _season_episode_from_filename(name: str) -> tuple[int, int] | None:
+    if not name:
+        return None
+    for pattern in (_SXXEYY, _TXNN, _NXNN):
+        match = pattern.search(name)
+        if match:
+            return int(match.group(1)), int(match.group(2))
+    return None
+
+
+def _prefer_trusted_file(files: list[dict]) -> dict:
+    ia_files = [
+        file
+        for file in files
+        if ".ia." in _store_file_basename(file).lower()
+    ]
+    pool = ia_files or files
+    return max(pool, key=lambda file: file.get("size") or 0)
+
+
+def _pick_file_by_trusted_index(
+    files,
+    index: str,
+    *,
+    season: int | None = None,
+    episode: int | None = None,
+    expected_size: int | None = None,
+) -> dict | None:
+    """Pick a debrid file for a manual/trusted playback URL.
+
+    StremThru maps TorBox ``f.Id`` onto JSON ``index``. That id is not the
+    bencode ``info.files`` position used at insert, so matching store index
+    would play the wrong episode (TorBox id 4 was T1-09, torrent index 4 is
+    T1-02, and S01E01 IA is torrent index 0).
+    """
+    if not isinstance(files, list):
+        return None
+    store_files = [file for file in files if isinstance(file, dict)]
+    if not store_files:
+        return None
+
+    if season is not None and episode is not None:
+        target = (int(season), int(episode))
+        matches = [
+            file
+            for file in store_files
+            if _season_episode_from_filename(_store_file_basename(file)) == target
+        ]
+        if matches:
+            return _prefer_trusted_file(matches)
+
+    if expected_size is not None:
+        try:
+            wanted_size = int(expected_size)
+        except (TypeError, ValueError):
+            wanted_size = None
+        if wanted_size:
+            size_matches = [
+                file for file in store_files if file.get("size") == wanted_size
+            ]
+            if len(size_matches) == 1:
+                return size_matches[0]
+            if len(size_matches) > 1:
+                return _prefer_trusted_file(size_matches)
+
     try:
         wanted = int(index)
     except (TypeError, ValueError):
         return None
-    if not isinstance(files, list):
-        return None
-    for file in files:
-        if not isinstance(file, dict):
-            continue
-        file_index = _coerce_store_file_index(file.get("index"))
-        if file_index is not None and file_index == wanted:
-            return file
-    if 0 <= wanted < len(files):
-        candidate = files[wanted]
-        if isinstance(candidate, dict):
-            return candidate
+    if all(_coerce_store_file_index(file.get("index")) is None for file in store_files):
+        if 0 <= wanted < len(store_files):
+            return store_files[wanted]
     return None
 
 
@@ -441,6 +509,7 @@ class StremThru:
         aliases: dict | None = None,
         *,
         trust_file_index: bool = False,
+        expected_size: int | None = None,
     ):
         """
         Smart file selection algorithm with scoring system.
@@ -511,12 +580,23 @@ class StremThru:
             torrent_name = unquote(torrent_name)
 
             if trust_file_index and index not in (None, "", "n"):
-                target_file = _pick_file_by_trusted_index(debrid_files, index)
+                target_file = _pick_file_by_trusted_index(
+                    debrid_files,
+                    index,
+                    season=season,
+                    episode=episode,
+                    expected_size=expected_size,
+                )
                 if target_file is None:
+                    available_names = [
+                        _store_file_basename(file) for file in debrid_files
+                        if isinstance(file, dict)
+                    ]
                     logger.log(
                         "PLAYBACK",
-                        f"Trusted index {index} not found for {hash}; "
-                        f"available indexes={file_indexes!r}",
+                        f"Trusted file not found for {hash} index={index!r} "
+                        f"S{season}E{episode}; indexes={file_indexes!r} "
+                        f"names={available_names[:20]!r}",
                     )
                     raise DebridLinkGenerationError(
                         self.store_name,
@@ -545,7 +625,8 @@ class StremThru:
                 filename = target_file.get("name") or torrent_name
                 logger.log(
                     "PLAYBACK",
-                    f"File selection for {hash}: trusted index {index} -> '{filename}'",
+                    f"File selection for {hash}: trusted S{season}E{episode} "
+                    f"index={index!r} size={expected_size!r} -> '{filename}'",
                 )
                 link = await self._post_store_json(
                     f"/link/generate?client_ip={self.client_ip}",
