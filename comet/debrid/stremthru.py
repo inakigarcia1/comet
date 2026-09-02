@@ -76,6 +76,31 @@ def _prepare_cached_torrents(responses, *, is_offcloud: bool):
     return prepared, filenames
 
 
+def _coerce_store_file_index(value) -> int | None:
+    if value is None or value == -1:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _pick_file_by_trusted_index(files, index: str) -> dict | None:
+    try:
+        wanted = int(index)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(files, list):
+        return None
+    for file in files:
+        if not isinstance(file, dict):
+            continue
+        file_index = _coerce_store_file_index(file.get("index"))
+        if file_index is not None and file_index == wanted:
+            return file
+    return None
+
+
 class StremThru:
     _MAGNET_READY_STATUSES: frozenset[str] = frozenset({"cached", "downloaded"})
     _MAGNET_PENDING_STATUSES: frozenset[str] = frozenset(
@@ -410,6 +435,8 @@ class StremThru:
         episode: int,
         sources: list | None = None,
         aliases: dict | None = None,
+        *,
+        trust_file_index: bool = False,
     ):
         """
         Smart file selection algorithm with scoring system.
@@ -461,6 +488,56 @@ class StremThru:
 
             name = unquote(name)
             torrent_name = unquote(torrent_name)
+
+            if trust_file_index and index not in (None, "", "n"):
+                target_file = _pick_file_by_trusted_index(
+                    magnet_data.get("files"), index
+                )
+                if target_file is None:
+                    raise DebridLinkGenerationError(
+                        self.store_name,
+                        f"{self.store_name}: No file at index {index}.",
+                        upstream_error_code="FILE_INDEX_NOT_FOUND",
+                        payload={"hash": hash, "index": index},
+                    )
+                file_link = target_file.get("link")
+                if not file_link:
+                    raise DebridLinkGenerationError(
+                        self.store_name,
+                        f"{self.store_name}: File at index {index} has no downloadable link.",
+                        upstream_error_code="FILE_LINK_MISSING",
+                        payload={
+                            "hash": hash,
+                            "index": index,
+                            "file": target_file,
+                        },
+                    )
+                filename = target_file.get("name") or torrent_name
+                logger.log(
+                    "PLAYBACK",
+                    f"File selection for {hash}: trusted index {index} -> '{filename}'",
+                )
+                link = await self._post_store_json(
+                    f"/link/generate?client_ip={self.client_ip}",
+                    {"link": file_link},
+                    "generate download link",
+                )
+                link_url = link.get("data", {}).get("link")
+                if not link_url:
+                    logger.warning(
+                        f"Missing generated link for hash {hash} and trusted index={index}. Full response payload: {link}"
+                    )
+                    raise DebridLinkGenerationError(
+                        self.store_name,
+                        f"{self.store_name}: Failed to generate download link.",
+                        payload={
+                            "hash": hash,
+                            "index": index,
+                            "target_file": target_file,
+                            "response": link,
+                        },
+                    )
+                return link_url
 
             aliases = aliases or {}
             ez_aliases_normalized = frozenset(

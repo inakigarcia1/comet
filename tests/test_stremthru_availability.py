@@ -142,3 +142,78 @@ class StremThruResponseTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(raised.exception.payload["error_type"], "RuntimeError")
         self.assertIsInstance(raised.exception.__cause__, RuntimeError)
+
+
+class StremThruTrustedFileIndexTests(unittest.IsolatedAsyncioTestCase):
+    _HASH = "db544aade436fc7a2d0ce82b3920166ea2cff6b5"
+    _FILES = [
+        {
+            "name": "T1-01. Tarjeta de Navidad [480p].mp4",
+            "index": 4,
+            "size": 100,
+            "link": "https://store.example/file4",
+        },
+        {
+            "name": "T1-02. El Gran Bonete [480p].mp4",
+            "index": 6,
+            "size": 100,
+            "link": "https://store.example/file6",
+        },
+    ]
+
+    def _client(self):
+        return StremThru(None, "tt0316613:1:1", "tt0316613", "torbox:token", "")
+
+    def _magnet_then_link(self, files=None):
+        files = self._FILES if files is None else files
+        calls = []
+
+        async def _post(endpoint, payload, action):
+            calls.append((endpoint, payload, action))
+            if endpoint.startswith("/magnets"):
+                return {"data": {"status": "cached", "files": files}}
+            if endpoint.startswith("/link/generate"):
+                return {"data": {"link": "https://cdn.example/play"}}
+            raise AssertionError(endpoint)
+
+        return _post, calls
+
+    async def test_trust_file_index_picks_unparseable_name(self):
+        client = self._client()
+        post, calls = self._magnet_then_link()
+        with patch.object(client, "_post_store_json", side_effect=post):
+            url = await client.generate_download_link(
+                self._HASH,
+                "4",
+                "T1-01. Tarjeta de Navidad [480p].mp4",
+                "Los Simuladores",
+                1,
+                1,
+                trust_file_index=True,
+            )
+
+        self.assertEqual(url, "https://cdn.example/play")
+        self.assertEqual(calls[1][1], {"link": "https://store.example/file4"})
+
+    async def test_without_trust_file_index_rejects_unparseable_episode_name(self):
+        client = self._client()
+        post, _calls = self._magnet_then_link()
+        with (
+            patch.object(client, "_post_store_json", side_effect=post),
+            patch.object(
+                client,
+                "_episode_request_context",
+                new=AsyncMock(return_value=(True, 1, 1, None)),
+            ),
+            self.assertRaises(DebridLinkGenerationError) as raised,
+        ):
+            await client.generate_download_link(
+                self._HASH,
+                "4",
+                "T1-01. Tarjeta de Navidad [480p].mp4",
+                "Los Simuladores",
+                1,
+                1,
+            )
+
+        self.assertEqual(raised.exception.upstream_error_code, "EPISODE_MATCH_NOT_FOUND")

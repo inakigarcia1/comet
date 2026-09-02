@@ -303,3 +303,107 @@ class TorrentOrchestrationTests(unittest.IsolatedAsyncioTestCase):
             manager.torrents[episode_hash]["title"],
             "Show.S02E03.mkv",
         )
+
+    async def test_manual_cache_row_skips_parsed_scope_filters(self):
+        manager = TorrentManager(
+            media_type="series",
+            media_full_id="tt0316613:1:1",
+            media_only_id="tt0316613",
+            title="Los Simuladores",
+            year=2002,
+            year_end=None,
+            season=1,
+            episode=1,
+            aliases={},
+            remove_adult_content=False,
+            reject_unknown_episode_files=True,
+        )
+        manual_hash = "a" * 40
+        scraper_hash = "b" * 40
+        parsed_json = (
+            '{"raw_title":"T1-01. Tarjeta de Navidad","parsed_title":'
+            '"T1-01. Tarjeta de Navidad","resolution":"SD","seasons":[],'
+            '"episodes":[],"languages":[],"dubbed":false,"date":null,'
+            '"year":null,"complete":false}'
+        )
+        base_row = {
+            "file_index": 4,
+            "title": "T1-01. Tarjeta de Navidad",
+            "seeders": 1,
+            "size": 100,
+            "tracker": "Manual",
+            "sources_json": "[]",
+            "episode": 1,
+            "updated_at": 1,
+            "parsed_json": parsed_json,
+        }
+        rows = [
+            {**base_row, "info_hash": manual_hash, "is_manual": 1},
+            {
+                **base_row,
+                "info_hash": scraper_hash,
+                "tracker": "Scraper",
+                "is_manual": 0,
+            },
+        ]
+
+        with patch.object(manager, "_fetch_cached_rows", return_value=rows):
+            await manager.get_cached_torrents()
+
+        self.assertIn(manual_hash, manager.torrents)
+        self.assertTrue(manager.torrents[manual_hash]["is_manual"])
+        self.assertNotIn(scraper_hash, manager.torrents)
+
+    async def test_manual_480p_survives_when_rank_worker_drops_all(self):
+        from RTN import DefaultRanking, parse
+
+        from comet.core.models import CometSettingsModel
+
+        manager = TorrentManager(
+            media_type="series",
+            media_full_id="tt0316613:1:1",
+            media_only_id="tt0316613",
+            title="Los Simuladores",
+            year=2002,
+            year_end=None,
+            season=1,
+            episode=1,
+            aliases={},
+            remove_adult_content=False,
+        )
+        manual_hash = "a" * 40
+        scraper_hash = "b" * 40
+        manager.torrents = {
+            scraper_hash: {
+                "title": "Show.S01E01.1080p.WEB-DL",
+                "parsed": parse("Show.S01E01.1080p.WEB-DL"),
+                "size": 1_000_000,
+                "is_manual": False,
+            },
+            manual_hash: {
+                "title": "Show.S01E01.480p.WEB-DL",
+                "parsed": parse("Show.S01E01.480p.WEB-DL"),
+                "size": 1_000_000,
+                "is_manual": True,
+            },
+        }
+        captured = {}
+
+        def fake_rank_worker(torrents, *args):
+            captured["hashes"] = set(torrents)
+            return {}
+
+        with patch(
+            "comet.services.orchestration.rank_worker",
+            side_effect=fake_rank_worker,
+        ):
+            await manager.rank_torrents(
+                CometSettingsModel(),
+                DefaultRanking(),
+                0,
+                0,
+                True,
+            )
+
+        self.assertEqual(captured["hashes"], {scraper_hash})
+        self.assertEqual(list(manager.ranked_torrents), [manual_hash])

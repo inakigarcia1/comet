@@ -6,6 +6,8 @@ from comet.api.endpoints.playback import (
     _cache_download_link_safely,
     _decode_sources,
     _parse_playback_path,
+    _resolve_playback_file_index,
+    _row_is_manual,
     _valid_download_url,
 )
 
@@ -98,3 +100,18 @@ class PlaybackCacheTests(unittest.IsolatedAsyncioTestCase):
         ):
             with self.subTest(value=value):
                 self.assertIsNone(_valid_download_url(value))
+
+    def test_resolves_n_from_manual_row(self):
+        row = {"is_manual": 1, "file_index": 4}
+        self.assertTrue(_row_is_manual(row))
+        self.assertEqual(
+            _resolve_playback_file_index("n", row, is_manual=True),
+            "4",
+        )
+
+    def test_keeps_n_for_non_manual(self):
+        row = {"is_manual": 0, "file_index": 4}
+        self.assertEqual(
+            _resolve_playback_file_index("n", row, is_manual=False),
+            "n",
+        )

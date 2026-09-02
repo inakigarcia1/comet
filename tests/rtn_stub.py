@@ -66,7 +66,16 @@ class Torrent:
 
 class ParsedData:
     def __init__(self, **kwargs):
-        # Allow any attribute; the slots list is just for documentation.
+        self.languages = []
+        self.dubbed = False
+        self.seasons = []
+        self.episodes = []
+        self.date = None
+        self.year = None
+        self.complete = False
+        self.resolution = "unknown"
+        self.parsed_title = None
+        self.raw_title = None
         self.__dict__.update(kwargs)
 
     def model_copy(self):
@@ -155,6 +164,7 @@ def parse(title):
             raw=None,
             title=None,
             complete=False,
+            date=None,
         )
     upper = title.upper()
     parts = title.replace(".", " ").replace("_", " ").split()
@@ -232,6 +242,7 @@ def parse(title):
         raw=None,
         title=title,
         complete=False,
+        date=None,
     )
 
 

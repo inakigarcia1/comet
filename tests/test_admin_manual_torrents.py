@@ -21,15 +21,20 @@ class ManualTorrentModelValidationTests(unittest.TestCase):
         self.assertEqual(resolved.title, "Movie.Name.2025.REMUX-GROUP")
         self.assertIn("udp://tracker.example.com", resolved.sources)
 
-    def test_resolve_rejects_unparseable_title(self):
-        from unittest.mock import patch
-
+    def test_resolve_accepts_unparseable_title_as_sd(self):
         from comet.api.models.manual_torrent import ManualTorrentIn
 
         class _BadParsed:
             parsed_title = None
             year = None
             resolution = "unknown"
+
+            def model_dump(self):
+                return {
+                    "parsed_title": None,
+                    "year": None,
+                    "resolution": "unknown",
+                }
 
         with patch("comet.api.models.manual_torrent.rtn_parse") as mock_parse:
             mock_parse.return_value = _BadParsed()
@@ -39,8 +44,45 @@ class ManualTorrentModelValidationTests(unittest.TestCase):
                 infoHash="0123456789abcdef0123456789abcdef01234567",
                 title="Movie.2025.REMUX-GROUP",
             )
-            with self.assertRaises(ValueError):
-                item.resolve()
+            resolved = item.resolve()
+            self.assertEqual(resolved.parsed["resolution"], "SD")
+            self.assertEqual(resolved.parsed["parsed_title"], "Movie.2025.REMUX-GROUP")
+
+    def test_resolve_uses_synthetic_sd_for_unparseable_episode_title(self):
+        from comet.api.models.manual_torrent import ManualTorrentIn
+
+        item = ManualTorrentIn(
+            mediaId="tt0316613",
+            mediaType="series",
+            infoHash="db544aade436fc7a2d0ce82b3920166ea2cff6b5",
+            title="T1-01. Tarjeta de Navidad",
+            season=1,
+            episode=1,
+            fileIndex=4,
+        )
+        resolved = item.resolve()
+        self.assertEqual(resolved.parsed["resolution"], "SD")
+        self.assertEqual(resolved.parsed["parsed_title"], "T1-01. Tarjeta de Navidad")
+        self.assertEqual(resolved.parsed["seasons"], [1])
+        self.assertEqual(resolved.parsed["episodes"], [1])
+
+    def test_resolve_series_scope_comes_from_explicit_fields(self):
+        from comet.api.models.manual_torrent import ManualTorrentIn
+
+        item = ManualTorrentIn(
+            mediaId="tt1234567",
+            mediaType="series",
+            infoHash="0123456789abcdef0123456789abcdef01234567",
+            title="Show.S99E99.1080p.WEB-DL-GROUP",
+            season=1,
+            episode=4,
+            fileIndex=3,
+        )
+        resolved = item.resolve()
+        self.assertEqual(resolved.season, 1)
+        self.assertEqual(resolved.episode, 4)
+        self.assertEqual(resolved.parsed["seasons"], [1])
+        self.assertEqual(resolved.parsed["episodes"], [4])
 
     def test_resolve_rejects_missing_hash(self):
         from comet.api.models.manual_torrent import ManualTorrentIn
@@ -147,13 +189,14 @@ class ManualTorrentAdminEndpointsTests(unittest.TestCase):
         mock_insert.assert_called_once()
         mock_flush.assert_called_once()
 
-    def test_post_manual_torrent_422_for_unparseable_title(self):
-        from unittest.mock import patch
-
+    def test_post_manual_torrent_accepts_unparseable_title(self):
         from comet.api.models.manual_torrent import ManualTorrentIn
 
         class _BadParsed:
             parsed_title = None
+
+            def model_dump(self):
+                return {"parsed_title": None, "resolution": "unknown"}
 
         with patch("comet.api.models.manual_torrent.rtn_parse") as mock_parse:
             mock_parse.return_value = _BadParsed()
@@ -163,8 +206,8 @@ class ManualTorrentAdminEndpointsTests(unittest.TestCase):
                 infoHash="0123456789abcdef0123456789abcdef01234567",
                 title="Movie.2025.REMUX-GROUP",
             )
-            with self.assertRaises(ValueError):
-                payload.resolve()
+            resolved = payload.resolve()
+            self.assertEqual(resolved.parsed["resolution"], "SD")
 
     def test_post_manual_torrent_422_for_invalid_hash(self):
         from pydantic import ValidationError

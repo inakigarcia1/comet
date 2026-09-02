@@ -39,6 +39,8 @@ rank_torrents (RTN) -> cache ->
 _select_info_hashes_by_resolution (maxResultsPerResolution, ultimo)
 ```
 
+Los torrents `is_manual=1` se extraen antes de `rank_torrents` y van al frente. No aplican `user_filters`, `cachedOnly` ni `maxResultsPerResolution`.
+
 `maxResultsPerResolution` se aplica al final, despues de todos los demas filtros.
 
 ## Query param: `durationMinutes`
@@ -84,8 +86,10 @@ Respuesta `200`:
 ```
 
 Errores:
-- `422` si RTN no parsea el title.
+- `422` si no hay title (ni `dn=` en el magnet).
 - `422` si el hash no es 40 hex chars.
+
+RTN es opcional. Si no extrae titulo + resolucion conocida, se persiste un `parsed` sintetico con `resolution: "SD"` y `seasons`/`episodes` de los campos explicitos. No hace falta mentir `720p` en el filename.
 
 ### POST /admin/api/torrents/manual/bulk
 
@@ -161,3 +165,5 @@ Respuesta:
 - **CometNet**: manuales NO se difunden por default. Solo si `shareCometnet=true` en el payload. Cero colision con flags existentes.
 - **Scraper posterior**: si un scraper re-encuentra el mismo `(media_id, info_hash, season_norm, episode_norm)`, su upsert NO toca `is_manual`. La marca se preserva.
 - **Refresh live acotado**: si `filenameInclude` no matchea ningun torrent cacheado, una sola pasada de scrape se fuerza (lock distribuido de Comet existente evita loops).
+- **Listing**: los `is_manual=1` ignoran filtros de calidad (`r480p`, `removeTrash`, `user_filters`), `cachedOnly` y el cap `maxResultsPerResolution`. El `WHERE` de cache ya acota media/season/episode.
+- **Playback**: la URL de stream incluye `fileIndex` aunque el magnet no figure cached. `generate_download_link` con `trust_file_index` elige el file N del magnet sin scoring RTN ni `_strict_episode_match`.

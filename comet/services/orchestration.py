@@ -213,7 +213,7 @@ class TorrentManager:
             self.search_episode,
         )
         query = (
-            "SELECT info_hash, file_index, title, seeders, size, tracker, sources_json, parsed_json, episode, updated_at "
+            "SELECT info_hash, file_index, title, seeders, size, tracker, sources_json, parsed_json, episode, updated_at, is_manual "
             + where_clause
         )
         return await database.fetch_all(query, params)
@@ -270,25 +270,28 @@ class TorrentManager:
                 continue
             ensure_multi_language(parsed_data)
 
-            target_season = self.search_season
-            if (
-                target_season is not None
-                and parsed_data.seasons
-                and target_season not in parsed_data.seasons
-            ):
-                continue
+            is_manual = bool(row.get("is_manual")) if hasattr(row, "get") else False
 
             reject_unknown_override = (
                 True
                 if self.reject_unknown_episode_files and self.search_episode is not None
                 else None
             )
-            if not self._matches_requested_scope(
-                parsed_data,
-                reject_unknown_override=reject_unknown_override,
-                scope_is_known=True,
-            ):
-                continue
+            if not is_manual:
+                target_season = self.search_season
+                if (
+                    target_season is not None
+                    and parsed_data.seasons
+                    and target_season not in parsed_data.seasons
+                ):
+                    continue
+
+                if not self._matches_requested_scope(
+                    parsed_data,
+                    reject_unknown_override=reject_unknown_override,
+                    scope_is_known=True,
+                ):
+                    continue
 
             info_hash = row["info_hash"]
             torrent_entry = {
@@ -300,8 +303,13 @@ class TorrentManager:
                 "sources": load_cached_string_list(row["sources_json"]),
                 "parsed": parsed_data,
                 "updatedAt": row["updated_at"],
+                "is_manual": is_manual,
             }
-            if self.user_filters is not None and self.user_filters.any_active():
+            if (
+                not is_manual
+                and self.user_filters is not None
+                and self.user_filters.any_active()
+            ):
                 scope_ok = self._matches_requested_scope(
                     parsed_data,
                     reject_unknown_override=reject_unknown_override,
@@ -436,22 +444,49 @@ class TorrentManager:
         remove_trash: int,
     ):
         loop = asyncio.get_running_loop()
-        ranked_torrents = await loop.run_in_executor(
-            get_executor(),
-            rank_worker,
-            self.torrents,
-            rtn_settings,
-            rtn_ranking,
-            max_results_per_resolution,
-            max_size,
-            remove_trash,
-        )
+        manual_hashes = [
+            info_hash
+            for info_hash, torrent in self.torrents.items()
+            if torrent.get("is_manual")
+        ]
+        scraper_torrents = {
+            info_hash: torrent
+            for info_hash, torrent in self.torrents.items()
+            if not torrent.get("is_manual")
+        }
+        if scraper_torrents:
+            ranked_torrents = await loop.run_in_executor(
+                get_executor(),
+                rank_worker,
+                scraper_torrents,
+                rtn_settings,
+                rtn_ranking,
+                max_results_per_resolution,
+                max_size,
+                remove_trash,
+            )
+        else:
+            ranked_torrents = {}
+        ranked_hashes = list(ranked_torrents)
+        combined = [
+            *manual_hashes,
+            *[
+                info_hash
+                for info_hash in ranked_hashes
+                if info_hash not in manual_hashes
+            ],
+        ]
         if self.media_scope.is_aggregate:
-            ranked_torrents = sorted(
-                ranked_torrents,
+            scraper_sorted = sorted(
+                [
+                    info_hash
+                    for info_hash in combined
+                    if info_hash not in manual_hashes
+                ],
                 key=lambda info_hash: self.media_scope.granularity_priority(
                     self.torrents[info_hash]["parsed"]
                 ),
                 reverse=True,
             )
-        self.ranked_torrents = ranked_torrents
+            combined = [*manual_hashes, *scraper_sorted]
+        self.ranked_torrents = combined

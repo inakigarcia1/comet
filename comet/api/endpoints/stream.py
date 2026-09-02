@@ -133,18 +133,34 @@ def _select_info_hashes_by_resolution(
     cached_only: bool,
     prioritize_cached: bool,
 ):
+    manual_hashes = [
+        info_hash
+        for info_hash in ranked_info_hashes
+        if torrents.get(info_hash, {}).get("is_manual")
+    ]
     if max_results <= 0:
         return None
 
     per_resolution_count = defaultdict(int)
     selected_info_hashes = []
+    selected = set()
 
-    def try_select(info_hash: str):
-        resolution = str(torrents[info_hash]["parsed"].resolution)
-        if per_resolution_count[resolution] >= max_results:
+    def try_select(info_hash: str, *, force: bool = False):
+        if info_hash in selected:
+            return
+        if not force:
+            resolution = str(torrents[info_hash]["parsed"].resolution)
+            if per_resolution_count[resolution] >= max_results:
+                return
+            selected_info_hashes.append(info_hash)
+            selected.add(info_hash)
+            per_resolution_count[resolution] += 1
             return
         selected_info_hashes.append(info_hash)
-        per_resolution_count[resolution] += 1
+        selected.add(info_hash)
+
+    for info_hash in manual_hashes:
+        try_select(info_hash, force=True)
 
     is_cached_by_hash = {}
     if prioritize_cached or cached_only:
@@ -155,6 +171,8 @@ def _select_info_hashes_by_resolution(
 
     if prioritize_cached:
         for info_hash in ranked_info_hashes:
+            if info_hash in selected:
+                continue
             if not is_cached_by_hash[info_hash]:
                 continue
             try_select(info_hash)
@@ -163,6 +181,8 @@ def _select_info_hashes_by_resolution(
             return selected_info_hashes
 
         for info_hash in ranked_info_hashes:
+            if info_hash in selected:
+                continue
             if is_cached_by_hash[info_hash]:
                 continue
             try_select(info_hash)
@@ -170,6 +190,8 @@ def _select_info_hashes_by_resolution(
         return selected_info_hashes
 
     for info_hash in ranked_info_hashes:
+        if info_hash in selected:
+            continue
         if cached_only and not is_cached_by_hash[info_hash]:
             continue
         try_select(info_hash)
@@ -447,8 +469,9 @@ async def stream(
                 if info_hash_cache_status
                 else False
             )
+            is_manual = bool(torrent.get("is_manual"))
 
-            if config["cachedOnly"] and not is_cached:
+            if config["cachedOnly"] and not is_cached and not is_manual:
                 continue
 
             if deduplicate_streams and info_hash in added_hashes and is_cached:
@@ -486,7 +509,9 @@ async def stream(
 
             file_index = torrent.get("fileIndex")
             file_index_str = (
-                str(file_index) if is_cached and file_index is not None else "n"
+                str(file_index)
+                if file_index is not None and (is_cached or is_manual)
+                else "n"
             )
             the_stream["url"] = (
                 f"{playback_base_url}/playback/{info_hash}/{entry_index}/{file_index_str}/{result_season}/{result_episode}"

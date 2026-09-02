@@ -90,6 +90,33 @@ def _decode_sources(sources_json) -> list[str]:
     return [source for source in sources if isinstance(source, str) and source]
 
 
+def _row_is_manual(row) -> bool:
+    if row is None:
+        return False
+    if hasattr(row, "get"):
+        return bool(row.get("is_manual"))
+    try:
+        return bool(row["is_manual"])
+    except (KeyError, IndexError, TypeError):
+        return False
+
+
+def _resolve_playback_file_index(index: str, torrent_row, *, is_manual: bool) -> str:
+    if index != "n" or not is_manual or torrent_row is None:
+        return index
+    file_index = None
+    if hasattr(torrent_row, "get"):
+        file_index = torrent_row.get("file_index")
+    else:
+        try:
+            file_index = torrent_row["file_index"]
+        except (KeyError, IndexError, TypeError):
+            file_index = None
+    if file_index is None:
+        return index
+    return str(file_index)
+
+
 def _build_playback_media_id(
     media_only_id: str,
     media_type: str,
@@ -269,24 +296,39 @@ async def playback(
     if download_url is None:
         # Retrieve torrent sources from database for private trackers.
         if media_id:
+            scope_params = build_scope_lookup_params(season, episode)
             torrent_data = await database.fetch_one(
                 """
-                SELECT sources_json
+                SELECT sources_json, is_manual, file_index, media_id
                 FROM torrents
                 WHERE info_hash = :info_hash
                 AND media_id = :media_id
-                ORDER BY updated_at DESC
+                AND season_norm = :season_norm
+                AND episode_norm = :episode_norm
+                ORDER BY is_manual DESC, updated_at DESC
                 LIMIT 1
                 """,
-                {"info_hash": hash, "media_id": media_id},
+                {"info_hash": hash, "media_id": media_id, **scope_params},
             )
             if torrent_data is None:
                 torrent_data = await database.fetch_one(
                     """
-                    SELECT sources_json
+                    SELECT sources_json, is_manual, file_index, media_id
                     FROM torrents
                     WHERE info_hash = :info_hash
-                    ORDER BY updated_at DESC
+                    AND media_id = :media_id
+                    ORDER BY is_manual DESC, updated_at DESC
+                    LIMIT 1
+                    """,
+                    {"info_hash": hash, "media_id": media_id},
+                )
+            if torrent_data is None:
+                torrent_data = await database.fetch_one(
+                    """
+                    SELECT sources_json, is_manual, file_index, media_id
+                    FROM torrents
+                    WHERE info_hash = :info_hash
+                    ORDER BY is_manual DESC, updated_at DESC
                     LIMIT 1
                     """,
                     {"info_hash": hash},
@@ -294,10 +336,10 @@ async def playback(
         else:
             torrent_data = await database.fetch_one(
                 """
-                SELECT sources_json, media_id
+                SELECT sources_json, is_manual, file_index, media_id
                 FROM torrents
                 WHERE info_hash = :info_hash
-                ORDER BY updated_at DESC
+                ORDER BY is_manual DESC, updated_at DESC
                 LIMIT 1
                 """,
                 {"info_hash": hash},
@@ -305,10 +347,14 @@ async def playback(
 
         sources = []
         context_media_id = media_id
+        is_manual = _row_is_manual(torrent_data)
         if torrent_data:
             sources = _decode_sources(torrent_data["sources_json"])
             if context_media_id is None:
                 context_media_id = torrent_data["media_id"]
+            index = _resolve_playback_file_index(
+                index, torrent_data, is_manual=is_manual
+            )
 
         aliases = {}
         debrid_video_id = None
@@ -354,6 +400,7 @@ async def playback(
                 episode,
                 sources,
                 aliases,
+                trust_file_index=is_manual,
             )
         except DebridLinkGenerationError as error:
             status_keys = error.status_keys

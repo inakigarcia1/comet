@@ -23,6 +23,85 @@ _MAGNET_HASH_PATTERN = re.compile(
 _MAGNET_DN_PATTERN = re.compile(r"dn=([^&]+)")
 _MAGNET_TR_PATTERN = re.compile(r"tr=([^&]+)")
 _VALID_SOURCES = re.compile(r"^[a-zA-Z0-9_\-\.:&/?=]+$")
+_KNOWN_RESOLUTIONS = frozenset(
+    {
+        "2160p",
+        "1440p",
+        "1080p",
+        "720p",
+        "576p",
+        "480p",
+        "360p",
+        "240p",
+        "SD",
+    }
+)
+
+
+def _synthetic_parsed_payload(
+    title: str, season: int | None, episode: int | None
+) -> dict:
+    """Minimal ParsedData dump when RTN cannot extract a title or resolution."""
+    return {
+        "raw_title": title,
+        "parsed_title": title,
+        "year": None,
+        "resolution": "SD",
+        "quality": None,
+        "rip": "UNKNOWN",
+        "codec": None,
+        "audio": None,
+        "channels": None,
+        "hdr": None,
+        "languages": [],
+        "extras": [],
+        "adult": False,
+        "trash": False,
+        "seasons": [season] if season is not None else [],
+        "episodes": [episode] if episode is not None else [],
+        "dubbed": False,
+        "edition": None,
+        "network": None,
+        "group": None,
+        "container": None,
+        "bitrate": None,
+        "site": None,
+        "proper": False,
+        "repack": False,
+        "upscaled": False,
+        "remux": False,
+        "documentary": False,
+        "three_d": False,
+        "converted": False,
+        "raw": None,
+        "title": title,
+        "complete": False,
+    }
+
+
+def _dump_parsed(parsed) -> dict:
+    if hasattr(parsed, "model_dump"):
+        payload = parsed.model_dump()
+        return payload if isinstance(payload, dict) else {}
+    data = getattr(parsed, "__dict__", None)
+    return dict(data) if isinstance(data, dict) else {}
+
+
+def _parsed_has_known_resolution(payload: dict) -> bool:
+    resolution = payload.get("resolution")
+    if not isinstance(resolution, str) or not resolution.strip():
+        return False
+    return resolution.strip() in _KNOWN_RESOLUTIONS
+
+
+def _overlay_explicit_scope(
+    payload: dict, season: int | None, episode: int | None
+) -> dict:
+    if season is not None:
+        payload["seasons"] = [season]
+    if episode is not None:
+        payload["episodes"] = [episode]
+    return payload
 
 
 class ManualTorrentIn(BaseModel):
@@ -87,8 +166,12 @@ class ManualTorrentIn(BaseModel):
         return self
 
     def resolve(self) -> ManualTorrentIn:
-        """Apply magnet extraction and RTN parsing. Returns a new instance with
-        normalized hashes/title/sources. Raises ValueError on invalid RTN."""
+        """Apply magnet extraction and optional RTN parsing.
+
+        Hash and title are still required. RTN is best-effort: if it cannot
+        extract a parsed title and a known resolution, a synthetic payload
+        with resolution ``SD`` is used instead of raising.
+        """
         magnet = self.magnet
         info_hash = self.infoHash
         title = self.title
@@ -121,16 +204,21 @@ class ManualTorrentIn(BaseModel):
         if not isinstance(title, str):
             raise ValueError("title must be a string")
 
+        parsed_payload: dict | None = None
         try:
             parsed = rtn_parse(title)
-        except Exception as exc:
-            raise ValueError(f"RTN failed to parse title: {exc}") from exc
-        if not parsed.parsed_title:
-            raise ValueError(
-                "RTN could not extract a parsed title; provide a fuller filename"
+        except Exception:
+            parsed = None
+        if parsed is not None:
+            dumped = _dump_parsed(parsed)
+            if dumped.get("parsed_title") and _parsed_has_known_resolution(dumped):
+                parsed_payload = dumped
+        if parsed_payload is None:
+            parsed_payload = _synthetic_parsed_payload(title, self.season, self.episode)
+        else:
+            parsed_payload = _overlay_explicit_scope(
+                parsed_payload, self.season, self.episode
             )
-
-        parsed_payload = parsed.model_dump() if hasattr(parsed, "model_dump") else {}
 
         if not sources:
             sources = ["manual"]
