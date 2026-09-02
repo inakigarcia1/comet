@@ -166,4 +166,4 @@ Respuesta:
 - **Scraper posterior**: si un scraper re-encuentra el mismo `(media_id, info_hash, season_norm, episode_norm)`, su upsert NO toca `is_manual`. La marca se preserva.
 - **Refresh live acotado**: si `filenameInclude` no matchea ningun torrent cacheado, una sola pasada de scrape se fuerza (lock distribuido de Comet existente evita loops).
 - **Listing**: los `is_manual=1` ignoran filtros de calidad (`r480p`, `removeTrash`, `user_filters`), `cachedOnly` y el cap `maxResultsPerResolution`. El `WHERE` de cache ya acota media/season/episode.
-- **Playback**: la URL de stream incluye `fileIndex` aunque el magnet no figure cached. `generate_download_link` con `trust_file_index` elige el file N del magnet sin scoring RTN ni `_strict_episode_match`.
+- **Playback**: la URL de stream incluye `fileIndex` aunque el magnet no figure cached. Si el path trae un indice numerico (o el row es `is_manual`), `generate_download_link` elige el file N del magnet sin scoring RTN ni `_strict_episode_match`. Un magnet `queued` con files se intenta igual; un file sin `link` se trata como `MEDIA_NOT_CACHED_YET`. Los logs de play van al contenedor Comet (`PLAYBACK`), no a Seq.

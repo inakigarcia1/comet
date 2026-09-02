@@ -115,3 +115,10 @@ class PlaybackCacheTests(unittest.IsolatedAsyncioTestCase):
             _resolve_playback_file_index("n", row, is_manual=False),
             "n",
         )
+
+    def test_numeric_path_index_stays_numeric_for_non_manual(self):
+        row = {"is_manual": 0, "file_index": 4}
+        self.assertEqual(
+            _resolve_playback_file_index("6", row, is_manual=False),
+            "6",
+        )

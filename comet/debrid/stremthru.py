@@ -98,6 +98,10 @@ def _pick_file_by_trusted_index(files, index: str) -> dict | None:
         file_index = _coerce_store_file_index(file.get("index"))
         if file_index is not None and file_index == wanted:
             return file
+    if 0 <= wanted < len(files):
+        candidate = files[wanted]
+        if isinstance(candidate, dict):
+            return candidate
     return None
 
 
@@ -465,14 +469,19 @@ class StremThru:
 
             magnet_data = magnet.get("data", {})
             magnet_status = magnet_data.get("status", "")
+            debrid_files = magnet_data.get("files") or []
+            file_indexes = [
+                file.get("index")
+                for file in debrid_files
+                if isinstance(file, dict)
+            ]
+            logger.log(
+                "PLAYBACK",
+                f"Magnet for {hash}: status={magnet_status!r} files={len(debrid_files)} "
+                f"indexes={file_indexes[:20]!r} trust_file_index={trust_file_index} "
+                f"requested_index={index!r}",
+            )
 
-            if magnet_status in self._MAGNET_PENDING_STATUSES:
-                raise DebridLinkGenerationError(
-                    self.store_name,
-                    f"{self.store_name}: Media is not cached yet (status: {magnet_status}).",
-                    upstream_error_code="MEDIA_NOT_CACHED_YET",
-                    payload={"status": magnet_status, "data": magnet_data},
-                )
             if magnet_status in self._MAGNET_INVALID_STATUSES:
                 raise DebridLinkGenerationError(
                     self.store_name,
@@ -480,36 +489,57 @@ class StremThru:
                     upstream_error_code="STORE_MAGNET_INVALID",
                     payload={"status": magnet_status, "data": magnet_data},
                 )
-            if magnet_status not in self._MAGNET_READY_STATUSES:
-                logger.warning(
-                    f"Unrecognized magnet status '{magnet_status}' for {hash} on {self.store_name}"
+            if not debrid_files and magnet_status in self._MAGNET_PENDING_STATUSES:
+                raise DebridLinkGenerationError(
+                    self.store_name,
+                    f"{self.store_name}: Media is not cached yet (status: {magnet_status}).",
+                    upstream_error_code="MEDIA_NOT_CACHED_YET",
+                    payload={"status": magnet_status, "data": magnet_data},
                 )
-                return
+            if (
+                magnet_status not in self._MAGNET_READY_STATUSES
+                and not debrid_files
+            ):
+                raise DebridLinkGenerationError(
+                    self.store_name,
+                    f"{self.store_name}: Media is not cached yet (status: {magnet_status}).",
+                    upstream_error_code="MEDIA_NOT_CACHED_YET",
+                    payload={"status": magnet_status, "data": magnet_data},
+                )
 
             name = unquote(name)
             torrent_name = unquote(torrent_name)
 
             if trust_file_index and index not in (None, "", "n"):
-                target_file = _pick_file_by_trusted_index(
-                    magnet_data.get("files"), index
-                )
+                target_file = _pick_file_by_trusted_index(debrid_files, index)
                 if target_file is None:
+                    logger.log(
+                        "PLAYBACK",
+                        f"Trusted index {index} not found for {hash}; "
+                        f"available indexes={file_indexes!r}",
+                    )
                     raise DebridLinkGenerationError(
                         self.store_name,
                         f"{self.store_name}: No file at index {index}.",
                         upstream_error_code="FILE_INDEX_NOT_FOUND",
-                        payload={"hash": hash, "index": index},
+                        payload={"hash": hash, "index": index, "indexes": file_indexes},
                     )
                 file_link = target_file.get("link")
                 if not file_link:
+                    logger.log(
+                        "PLAYBACK",
+                        f"Trusted index {index} for {hash} has no link "
+                        f"(status={magnet_status!r} name={target_file.get('name')!r})",
+                    )
                     raise DebridLinkGenerationError(
                         self.store_name,
                         f"{self.store_name}: File at index {index} has no downloadable link.",
-                        upstream_error_code="FILE_LINK_MISSING",
+                        upstream_error_code="MEDIA_NOT_CACHED_YET",
                         payload={
                             "hash": hash,
                             "index": index,
                             "file": target_file,
+                            "status": magnet_status,
                         },
                     )
                 filename = target_file.get("name") or torrent_name
@@ -538,6 +568,14 @@ class StremThru:
                         },
                     )
                 return link_url
+
+            if magnet_status not in self._MAGNET_READY_STATUSES:
+                raise DebridLinkGenerationError(
+                    self.store_name,
+                    f"{self.store_name}: Media is not cached yet (status: {magnet_status}).",
+                    upstream_error_code="MEDIA_NOT_CACHED_YET",
+                    payload={"status": magnet_status, "data": magnet_data},
+                )
 
             aliases = aliases or {}
             ez_aliases_normalized = frozenset(

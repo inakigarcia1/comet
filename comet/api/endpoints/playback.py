@@ -348,6 +348,7 @@ async def playback(
         sources = []
         context_media_id = media_id
         is_manual = _row_is_manual(torrent_data)
+        trust_file_index = is_manual or index not in (None, "", "n")
         if torrent_data:
             sources = _decode_sources(torrent_data["sources_json"])
             if context_media_id is None:
@@ -355,6 +356,14 @@ async def playback(
             index = _resolve_playback_file_index(
                 index, torrent_data, is_manual=is_manual
             )
+            trust_file_index = is_manual or index not in (None, "", "n")
+
+        logger.log(
+            "PLAYBACK",
+            f"Resolving {hash} index={index!r} is_manual={is_manual} "
+            f"trust_file_index={trust_file_index} media_id={context_media_id!r} "
+            f"season={season!r} episode={episode!r}",
+        )
 
         aliases = {}
         debrid_video_id = None
@@ -400,9 +409,15 @@ async def playback(
                 episode,
                 sources,
                 aliases,
-                trust_file_index=is_manual,
+                trust_file_index=trust_file_index,
             )
         except DebridLinkGenerationError as error:
+            logger.log(
+                "PLAYBACK",
+                f"Link generation failed for {hash} index={index!r}: "
+                f"{error.upstream_error_code or error.error_code or type(error).__name__} "
+                f"({error.message})",
+            )
             status_keys = error.status_keys
             return build_status_video_response(
                 status_keys,
@@ -410,6 +425,11 @@ async def playback(
             )
 
         if not download_url:
+            logger.log(
+                "PLAYBACK",
+                f"Empty download URL for {hash} index={index!r} "
+                f"is_manual={is_manual} trust_file_index={trust_file_index}",
+            )
             return build_status_video_response(
                 [],
                 default_key="UNKNOWN",

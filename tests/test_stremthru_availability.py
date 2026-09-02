@@ -217,3 +217,87 @@ class StremThruTrustedFileIndexTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(raised.exception.upstream_error_code, "EPISODE_MATCH_NOT_FOUND")
+
+    async def test_trust_file_index_uses_queued_magnet_when_files_exist(self):
+        client = self._client()
+        files = self._FILES
+        calls = []
+
+        async def _post(endpoint, payload, action):
+            calls.append((endpoint, payload, action))
+            if endpoint.startswith("/magnets"):
+                return {"data": {"status": "queued", "files": files}}
+            if endpoint.startswith("/link/generate"):
+                return {"data": {"link": "https://cdn.example/play"}}
+            raise AssertionError(endpoint)
+
+        with patch.object(client, "_post_store_json", side_effect=_post):
+            url = await client.generate_download_link(
+                self._HASH,
+                "6",
+                "T1-02. El Gran Bonete [480p].mp4",
+                "Los Simuladores",
+                1,
+                2,
+                trust_file_index=True,
+            )
+
+        self.assertEqual(url, "https://cdn.example/play")
+        self.assertEqual(calls[1][1], {"link": "https://store.example/file6"})
+
+    async def test_trust_file_index_falls_back_to_list_position(self):
+        client = self._client()
+        files = [
+            {
+                "name": "nfo.txt",
+                "index": -1,
+                "size": 10,
+                "link": "https://store.example/0",
+            },
+            {
+                "name": "T1-01. Tarjeta de Navidad [480p].mp4",
+                "index": -1,
+                "size": 100,
+                "link": "https://store.example/pos1",
+            },
+        ]
+        post, calls = self._magnet_then_link(files)
+        with patch.object(client, "_post_store_json", side_effect=post):
+            url = await client.generate_download_link(
+                self._HASH,
+                "1",
+                "T1-01. Tarjeta de Navidad [480p].mp4",
+                "Los Simuladores",
+                1,
+                1,
+                trust_file_index=True,
+            )
+
+        self.assertEqual(url, "https://cdn.example/play")
+        self.assertEqual(calls[1][1], {"link": "https://store.example/pos1"})
+
+    async def test_trust_file_index_missing_link_is_not_cached_yet(self):
+        client = self._client()
+        files = [
+            {
+                "name": "T1-01. Tarjeta de Navidad [480p].mp4",
+                "index": 4,
+                "size": 100,
+            }
+        ]
+        post, _calls = self._magnet_then_link(files)
+        with (
+            patch.object(client, "_post_store_json", side_effect=post),
+            self.assertRaises(DebridLinkGenerationError) as raised,
+        ):
+            await client.generate_download_link(
+                self._HASH,
+                "4",
+                "T1-01. Tarjeta de Navidad [480p].mp4",
+                "Los Simuladores",
+                1,
+                1,
+                trust_file_index=True,
+            )
+
+        self.assertEqual(raised.exception.upstream_error_code, "MEDIA_NOT_CACHED_YET")
