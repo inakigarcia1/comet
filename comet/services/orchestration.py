@@ -11,6 +11,7 @@ from comet.scrapers.manager import scraper_manager
 from comet.scrapers.models import ScrapeRequest
 from comet.services.filtering import (
     TitleMatcher,
+    _log_exclusion,
     filter_worker,
     release_below_min_size,
     release_identity_mismatch,
@@ -293,25 +294,22 @@ class TorrentManager:
             )
             if not is_manual:
                 if release_below_min_size(row["size"]):
-                    logger.log(
-                        "FILTER",
-                        f"❌ Rejected (too-small) | {row['title']} | Expected: {self.title}",
+                    _log_exclusion(
+                        f"❌ Rejected (too-small) | {row['title']} | Expected: {self.title}"
                     )
                     continue
                 if not matcher.matches_title(
                     row["title"], parsed_data.parsed_title or ""
                 ):
-                    logger.log(
-                        "FILTER",
+                    _log_exclusion(
                         "❌ Rejected (Title Mismatch) | "
-                        f"{row['title']} | Expected: {self.title}",
+                        f"{row['title']} | Expected: {self.title}"
                     )
                     continue
                 if not matcher.matches_year(parsed_data.year):
-                    logger.log(
-                        "FILTER",
+                    _log_exclusion(
                         "❌ Rejected (Year Mismatch) | "
-                        f"{row['title']} | Year: {parsed_data.year} | Expected: {self.title}",
+                        f"{row['title']} | Year: {parsed_data.year} | Expected: {self.title}"
                     )
                     continue
                 identity = release_identity_mismatch(
@@ -324,9 +322,8 @@ class TorrentManager:
                     aliases_normalized=matcher.aliases_normalized,
                 )
                 if identity:
-                    logger.log(
-                        "FILTER",
-                        f"❌ Rejected ({identity}) | {row['title']} | Expected: {self.title}",
+                    _log_exclusion(
+                        f"❌ Rejected ({identity}) | {row['title']} | Expected: {self.title}"
                     )
                     continue
 

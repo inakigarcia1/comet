@@ -551,9 +551,8 @@ def filter_worker(
             continue
 
         if release_below_min_size(torrent.get("size")):
-            logger.log(
-                "FILTER",
-                f"❌ Rejected (too-small) | {torrent_title} | Expected: {title}",
+            _log_exclusion(
+                f"❌ Rejected (too-small) | {torrent_title} | Expected: {title}"
             )
             continue
 
@@ -586,9 +585,8 @@ def filter_worker(
             aliases_normalized=matcher.aliases_normalized,
         )
         if identity:
-            logger.log(
-                "FILTER",
-                f"❌ Rejected ({identity}) | {torrent_title} | Expected: {title}",
+            _log_exclusion(
+                f"❌ Rejected ({identity}) | {torrent_title} | Expected: {title}"
             )
             continue
 
