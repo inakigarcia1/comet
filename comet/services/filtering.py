@@ -96,7 +96,12 @@ _TITLE_HEAD_SPLIT = re.compile(
     re.IGNORECASE,
 )
 _YEAR_SPAN = re.compile(r"\b(?:19|20)\d{2}\s*[-–]\s*(?:19|20)\d{2}\b")
+_SEASON_MARKER = re.compile(
+    r"\b(?:s\d{1,3}(?:e\d{1,3})?|\d{1,2}x\d{1,2})\b",
+    re.IGNORECASE,
+)
 _GAME_REPACK = re.compile(r"\b(?:dodi|fitgirl|elamigos)\b", re.IGNORECASE)
+_MIN_RELEASE_BYTES = 100 * 1024 * 1024
 _ORIGIN_PHRASES = {
     "us": ("united states", "usa", "u.s.a", "u.s."),
     "uk": ("united kingdom", "great britain", "england"),
@@ -127,28 +132,134 @@ def _origin_matches_country(country: str, origin: str | None) -> bool:
     return any(phrase in text for phrase in phrases)
 
 
+def release_below_min_size(size) -> bool:
+    return (
+        isinstance(size, int)
+        and not isinstance(size, bool)
+        and 0 < size < _MIN_RELEASE_BYTES
+    )
+
+
+def _air_year(air_date: str | None) -> int | None:
+    if not isinstance(air_date, str) or len(air_date) < 4:
+        return None
+    head = air_date[:4]
+    return int(head) if head.isdigit() else None
+
+
+def _span_covers_year(raw_title: str, year: int) -> bool:
+    match = _YEAR_SPAN.search(raw_title)
+    if match is None:
+        return False
+    years = [int(item) for item in re.findall(r"(?:19|20)\d{2}", match.group())]
+    return len(years) >= 2 and years[0] <= year <= years[-1]
+
+
+def _extra_title_tokens(
+    expected_title: str | None,
+    parsed_title: str | None,
+    aliases_normalized,
+    origin: str | None,
+) -> bool:
+    if not expected_title or not parsed_title:
+        return False
+    expected_tokens = scrub(expected_title).split()
+    parsed_tokens = scrub(parsed_title).split()
+    if not expected_tokens or parsed_tokens[: len(expected_tokens)] != expected_tokens:
+        return False
+    extra = parsed_tokens[len(expected_tokens) :]
+    if not extra:
+        return False
+    allowed = set()
+    for alias in aliases_normalized or ():
+        alias_tokens = alias.split()
+        if alias_tokens[: len(expected_tokens)] == expected_tokens:
+            allowed.update(alias_tokens[len(expected_tokens) :])
+    if origin:
+        folded = origin.casefold()
+        for code, phrases in _ORIGIN_PHRASES.items():
+            if any(phrase in folded for phrase in phrases):
+                allowed.add(code)
+    return any(token not in allowed for token in extra)
+
+
+def _netflix_reprint_of_old_episode(raw_title: str, parsed, air_year: int | None) -> bool:
+    if air_year is None or air_year >= 2014:
+        return False
+    network = str(getattr(parsed, "network", "") or "").casefold()
+    if network != "netflix" and re.search(r"\bnf\b", raw_title, re.IGNORECASE) is None:
+        return False
+    languages = {
+        str(item).casefold() for item in (getattr(parsed, "languages", None) or [])
+    }
+    return "ja" not in languages and "jp" not in languages
+
+
+def _old_episode_without_original_audio(parsed, air_year: int | None) -> bool:
+    # Atmos without Japanese on an episode from before Atmos was normal
+    # is the live-action dub (One Piece Netflix), not the anime.
+    if air_year is None or air_year >= 2014:
+        return False
+    audio = {str(item).casefold() for item in (getattr(parsed, "audio", None) or [])}
+    if "atmos" not in audio:
+        return False
+    languages = {
+        str(item).casefold() for item in (getattr(parsed, "languages", None) or [])
+    }
+    if not languages or "ja" in languages or "jp" in languages:
+        return False
+    return True
+
+
 def release_identity_mismatch(
     parsed,
     raw_title: str,
     *,
     media_type: str,
     origin: str | None,
+    air_date: str | None = None,
+    expected_title: str | None = None,
+    aliases_normalized=(),
 ) -> str | None:
     country = getattr(parsed, "country", None)
     if _country_in_title_head(raw_title, country) and not _origin_matches_country(
         country, origin
     ):
         return "spinoff-country"
+    if _extra_title_tokens(
+        expected_title,
+        getattr(parsed, "parsed_title", None),
+        aliases_normalized,
+        origin,
+    ):
+        return "extra-title"
+
+    air_year = _air_year(air_date)
+    parsed_year = getattr(parsed, "year", None)
+    if (
+        media_type == "series"
+        and air_year
+        and parsed_year
+        and abs(parsed_year - air_year) > 1
+        and not _span_covers_year(raw_title, air_year)
+    ):
+        return "air-year"
+    if media_type == "series" and _old_episode_without_original_audio(parsed, air_year):
+        return "live-action-audio"
+    if media_type == "series" and _netflix_reprint_of_old_episode(
+        raw_title, parsed, air_year
+    ):
+        return "netflix-reprint"
 
     if media_type != "movie":
         return None
-    if getattr(parsed, "seasons", None) or getattr(parsed, "episodes", None):
+    if _SEASON_MARKER.search(raw_title):
         return "series-file"
     if _YEAR_SPAN.search(raw_title):
         return "year-span"
     if _GAME_REPACK.search(raw_title):
         return "game-repack"
-    if getattr(parsed, "complete", False) and not getattr(parsed, "year", None):
+    if getattr(parsed, "complete", False) and not parsed_year:
         return "collection"
     return None
 
@@ -369,6 +480,7 @@ def filter_worker(
     user_filters=None,
     scope_matches=None,
     origin=None,
+    air_date=None,
 ):
     results = []
     matcher = TitleMatcher(title, year, year_end, media_type, aliases)
@@ -438,6 +550,13 @@ def filter_worker(
             _log_exclusion(f"❌ Rejected (No Parsed Title) | {torrent_title}")
             continue
 
+        if release_below_min_size(torrent.get("size")):
+            logger.log(
+                "FILTER",
+                f"❌ Rejected (too-small) | {torrent_title} | Expected: {title}",
+            )
+            continue
+
         if not matcher.matches_title(torrent_title, parsed.parsed_title):
             _log_exclusion(
                 f"❌ Rejected (Title Mismatch) | {torrent_title} | Parsed: {parsed.parsed_title} | Expected: {title}"
@@ -462,6 +581,9 @@ def filter_worker(
             torrent_title,
             media_type=media_type,
             origin=origin,
+            air_date=air_date,
+            expected_title=title,
+            aliases_normalized=matcher.aliases_normalized,
         )
         if identity:
             logger.log(

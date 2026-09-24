@@ -676,6 +676,7 @@ async def get_account_torrents_for_media(
             None,
             None,
             origin,
+            target_air_date,
         )
 
         for torrent in filtered_torrents:

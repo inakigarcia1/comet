@@ -8,6 +8,7 @@ from comet.services.filtering import (
     _normalize_aliases,
     exact_alias_match,
     filter_worker,
+    release_identity_mismatch,
     settings,
 )
 
@@ -190,6 +191,123 @@ class AliasFilteringTests(unittest.TestCase):
         )
 
         self.assertEqual([torrent["title"] for torrent in actual], [kept])
+
+    def test_numbered_sequel_and_other_series_do_not_match(self):
+        resident = filter_worker(
+            [
+                {
+                    "title": "Resident Evil 4-EMPRESS",
+                    "infoHash": "1" * 40,
+                    "size": 200 * 1024 * 1024,
+                }
+            ],
+            "Resident Evil",
+            2026,
+            None,
+            "movie",
+            {},
+            False,
+            origin="Germany, United States",
+        )
+        los_angeles = filter_worker(
+            [
+                {
+                    "title": "Law.And.Order.LA.S01E01.720p.HDTV.x264.mkv",
+                    "infoHash": "2" * 40,
+                    "size": 200 * 1024 * 1024,
+                }
+            ],
+            "Law & Order",
+            1990,
+            None,
+            "series",
+            {},
+            False,
+            origin="United States",
+        )
+
+        self.assertEqual(resident, [])
+        self.assertEqual(los_angeles, [])
+
+    def test_live_action_one_piece_is_not_the_1999_episode(self):
+        kept = (
+            "One.Piece.S01E01-30.1999-2011.Mkv.WEBDLMux.1080p."
+            "Ita.Jap.Aac.Subs.ProgettoOnePiece"
+        )
+        actual = filter_worker(
+            [
+                {
+                    "title": "One Piece 2023 S01E01-08 ITA ENG 1080p NF WEB-DL DDP5 1 x264-UBi",
+                    "infoHash": "1" * 40,
+                    "size": 500 * 1024 * 1024,
+                },
+                {
+                    "title": "One.Piece.S01E01.1080p.ENG.And.ESP.LATINO.DDP5.1.Atmos.MKV-BEN.THE.MEN.mkv",
+                    "infoHash": "2" * 40,
+                    "size": 500 * 1024 * 1024,
+                },
+                {
+                    "title": "One Piece S01 1080p NF WEB-DL DDP5 1 Atmos H 264-LatTeam",
+                    "infoHash": "4" * 40,
+                    "size": 500 * 1024 * 1024,
+                },
+                {
+                    "title": kept,
+                    "infoHash": "3" * 40,
+                    "size": 500 * 1024 * 1024,
+                },
+            ],
+            "One Piece",
+            1999,
+            None,
+            "series",
+            {},
+            False,
+            origin="Japan",
+            air_date="1999-10-20",
+        )
+
+        self.assertEqual([torrent["title"] for torrent in actual], [kept])
+
+    def test_release_under_100mb_is_dropped(self):
+        title = "Law.and.Order.S01E01.1080p.WEB-DL"
+        small = filter_worker(
+            [{"title": title, "infoHash": "1" * 40, "size": 15 * 1024 * 1024}],
+            "Law & Order",
+            1990,
+            None,
+            "series",
+            {},
+            False,
+            origin="United States",
+        )
+        large = filter_worker(
+            [{"title": title, "infoHash": "1" * 40, "size": 200 * 1024 * 1024}],
+            "Law & Order",
+            1990,
+            None,
+            "series",
+            {},
+            False,
+            origin="United States",
+        )
+
+        self.assertEqual(small, [])
+        self.assertEqual(len(large), 1)
+
+    def test_release_group_suffix_is_not_a_series_episode(self):
+        title = "Den of Thieves 2 Pantera (2025)-alE13 mkv"
+        parsed = parse(title)
+
+        self.assertIsNone(
+            release_identity_mismatch(
+                parsed,
+                title,
+                media_type="movie",
+                origin="United States",
+                expected_title="Den of Thieves 2 Pantera",
+            )
+        )
 
 
 if __name__ == "__main__":

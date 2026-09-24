@@ -9,7 +9,12 @@ from comet.core.models import CometSettingsModel, database, settings
 from comet.core.scrape import ScrapeContext
 from comet.scrapers.manager import scraper_manager
 from comet.scrapers.models import ScrapeRequest
-from comet.services.filtering import filter_worker, release_identity_mismatch
+from comet.services.filtering import (
+    TitleMatcher,
+    filter_worker,
+    release_below_min_size,
+    release_identity_mismatch,
+)
 from comet.services.ranking import rank_worker
 from comet.services.torrent_manager import torrent_update_queue
 from comet.utils.languages import select_indexer_titles
@@ -263,6 +268,13 @@ class TorrentManager:
 
             rows = list(best_rows.values())
 
+        matcher = TitleMatcher(
+            self.title,
+            self.year,
+            self.year_end,
+            self.media_type,
+            self.aliases,
+        )
         for row in rows:
             parsed_data = load_cached_parsed(row["parsed_json"])
             if parsed_data is None:
@@ -280,11 +292,36 @@ class TorrentManager:
                 else None
             )
             if not is_manual:
+                if release_below_min_size(row["size"]):
+                    logger.log(
+                        "FILTER",
+                        f"❌ Rejected (too-small) | {row['title']} | Expected: {self.title}",
+                    )
+                    continue
+                if not matcher.matches_title(
+                    row["title"], parsed_data.parsed_title or ""
+                ):
+                    logger.log(
+                        "FILTER",
+                        "❌ Rejected (Title Mismatch) | "
+                        f"{row['title']} | Expected: {self.title}",
+                    )
+                    continue
+                if not matcher.matches_year(parsed_data.year):
+                    logger.log(
+                        "FILTER",
+                        "❌ Rejected (Year Mismatch) | "
+                        f"{row['title']} | Year: {parsed_data.year} | Expected: {self.title}",
+                    )
+                    continue
                 identity = release_identity_mismatch(
                     parsed_data,
                     row["title"],
                     media_type=self.media_type,
                     origin=self.origin,
+                    air_date=self.target_air_date,
+                    expected_title=self.title,
+                    aliases_normalized=matcher.aliases_normalized,
                 )
                 if identity:
                     logger.log(
@@ -444,6 +481,7 @@ class TorrentManager:
                 self.user_filters,
                 self._scope_matches_torrent,
                 self.origin,
+                self.target_air_date,
             )
             for i in range(0, len(new_torrents), chunk_size)
         ]
