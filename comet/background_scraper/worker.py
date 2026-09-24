@@ -1352,6 +1352,7 @@ class BackgroundScraperWorker:
             episode=None,
             aliases=aliases,
             remove_adult_content=settings.REMOVE_ADULT_CONTENT,
+            origin=metadata.get("origin"),
         )
 
         await manager.scrape_torrents(ScrapeContext.BACKGROUND)
@@ -1407,6 +1408,7 @@ class BackgroundScraperWorker:
                     episode=episode_number,
                     aliases=aliases,
                     remove_adult_content=settings.REMOVE_ADULT_CONTENT,
+                    origin=metadata.get("origin"),
                 )
                 await manager.scrape_torrents(ScrapeContext.BACKGROUND)
                 episode_torrents = len(manager.torrents)

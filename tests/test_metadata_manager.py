@@ -175,6 +175,7 @@ class MetadataRefreshTests(unittest.IsolatedAsyncioTestCase):
                         title TEXT,
                         year INTEGER,
                         year_end INTEGER,
+                        origin TEXT,
                         aliases_json TEXT,
                         metadata_updated_at REAL,
                         aliases_updated_at REAL

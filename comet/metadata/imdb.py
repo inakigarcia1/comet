@@ -221,16 +221,16 @@ def _extract_imdb_metadata(payload: dict) -> tuple[str | None, int | None, int |
 
 def _extract_cinemeta_metadata(
     payload: dict,
-) -> tuple[str | None, int | None, int | None]:
+) -> tuple[str | None, int | None, int | None, str | None]:
     if not isinstance(payload, dict):
-        return None, None, None
+        return None, None, None, None
 
     meta = payload.get("meta")
     if not isinstance(meta, dict):
-        return None, None, None
+        return None, None, None, None
     title = meta.get("name")
     if not isinstance(title, str) or not title:
-        return None, None, None
+        return None, None, None, None
 
     year, year_end = parse_year_range(meta.get("year"))
     if year is None:
@@ -239,7 +239,9 @@ def _extract_cinemeta_metadata(
     if year is None:
         year = parse_year(meta.get("released"))
 
-    return title, year, year_end
+    country = meta.get("country")
+    origin = country.strip() if isinstance(country, str) and country.strip() else None
+    return title, year, year_end, origin
 
 
 def _iter_cinemeta_media_types(media_type: str | None):
@@ -250,7 +252,7 @@ def _iter_cinemeta_media_types(media_type: str | None):
 
 async def _get_cinemeta_metadata(
     session: aiohttp.ClientSession, id: str, media_type: str | None
-) -> tuple[str | None, int | None, int | None]:
+) -> tuple[str | None, int | None, int | None, str | None]:
     for candidate_type in _iter_cinemeta_media_types(media_type):
         url = _CINEMETA_META_URL.format(media_type=candidate_type, id=id)
 
@@ -275,7 +277,7 @@ async def _get_cinemeta_metadata(
         if parsed[0] is not None:
             return parsed
 
-    return None, None, None
+    return None, None, None, None
 
 
 async def get_imdb_metadata(
@@ -303,15 +305,12 @@ async def get_imdb_metadata(
         return await _get_cinemeta_metadata(session, id, media_type)
 
     parsed = _extract_imdb_metadata(metadata)
-    if parsed[0] is not None:
-        return parsed
+    cinemeta = await _get_cinemeta_metadata(session, id, media_type)
+    if parsed[0] is None:
+        if cinemeta[0] is not None:
+            return cinemeta
+        if metadata:
+            logger.warning(f"No metadata found for {id}. IMDB response: {metadata}")
+        return None, None, None, None
 
-    logger.warning(f"IMDB metadata empty for {id}, using Cinemeta fallback")
-    fallback = await _get_cinemeta_metadata(session, id, media_type)
-    if fallback[0] is not None:
-        return fallback
-
-    if metadata:
-        logger.warning(f"No metadata found for {id}. IMDB response: {metadata}")
-
-    return None, None, None
+    return parsed[0], parsed[1], parsed[2], cinemeta[3]

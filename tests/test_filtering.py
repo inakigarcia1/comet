@@ -83,6 +83,114 @@ class AliasFilteringTests(unittest.TestCase):
 
         self.assertEqual(actual[0]["parsed"].languages, ["it"])
 
+    def test_uk_spinoff_does_not_match_the_us_show(self):
+        actual = filter_worker(
+            [
+                {
+                    "title": "Law and Order UK S01E01 Care 1080p AMZN WEB-DL",
+                    "infoHash": "1" * 40,
+                }
+            ],
+            "Law & Order",
+            1990,
+            None,
+            "series",
+            {},
+            False,
+            origin="United States",
+        )
+
+        self.assertEqual(actual, [])
+
+    def test_same_show_without_a_country_suffix_stays(self):
+        actual = filter_worker(
+            [
+                {
+                    "title": "Law.and.Order.S01E01.1080p.WEB-DL",
+                    "infoHash": "1" * 40,
+                }
+            ],
+            "Law & Order",
+            1990,
+            None,
+            "series",
+            {},
+            False,
+            origin="United States",
+        )
+
+        self.assertEqual(len(actual), 1)
+
+    def test_country_suffix_stays_when_it_is_the_shows_origin(self):
+        actual = filter_worker(
+            [
+                {
+                    "title": "The.Office.UK.S01E01.1080p.WEB-DL",
+                    "infoHash": "1" * 40,
+                }
+            ],
+            "The Office",
+            2001,
+            2003,
+            "series",
+            {},
+            False,
+            origin="United Kingdom",
+        )
+
+        self.assertEqual(len(actual), 1)
+
+    def test_region_tag_after_the_year_stays(self):
+        actual = filter_worker(
+            [
+                {
+                    "title": "Paddington.2014.1080p.BluRay.UK",
+                    "infoHash": "1" * 40,
+                }
+            ],
+            "Paddington",
+            2014,
+            None,
+            "movie",
+            {},
+            False,
+            origin="United Kingdom",
+        )
+
+        self.assertEqual(len(actual), 1)
+
+    def test_movie_search_drops_collections_and_series_packs(self):
+        kept = "Resident Evil (2026) 1080p AMZN WEB-DL DDP5 1 H 264-FLUX"
+        actual = filter_worker(
+            [
+                {
+                    "title": "Resident Evil (2002-2016) Hexalogie BluRay 1080p x264",
+                    "infoHash": "1" * 40,
+                },
+                {
+                    "title": "Resident Evil S01 COMPLETE 720p NF WEBRip x264",
+                    "infoHash": "2" * 40,
+                },
+                {
+                    "title": kept,
+                    "infoHash": "3" * 40,
+                },
+                {
+                    "title": "Resident Evil HD Remaster - [DODI Repack]",
+                    "infoHash": "4" * 40,
+                },
+            ],
+            "Resident Evil",
+            2026,
+            None,
+            "movie",
+            {},
+            False,
+            origin="Germany, United States",
+        )
+
+        self.assertEqual([torrent["title"] for torrent in actual], [kept])
+
 
 if __name__ == "__main__":
     unittest.main()

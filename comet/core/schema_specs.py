@@ -187,6 +187,7 @@ MEDIA_METADATA_CACHE_TABLE_SPEC = ManagedTableSpec(
             title TEXT,
             year INTEGER,
             year_end INTEGER,
+            origin TEXT,
             aliases_json TEXT,
             metadata_updated_at REAL,
             aliases_updated_at REAL,
@@ -199,6 +200,7 @@ MEDIA_METADATA_CACHE_TABLE_SPEC = ManagedTableSpec(
             column_name="aliases_updated_at",
             column_sql="aliases_updated_at REAL",
         ),
+        LegacyColumnMigration("origin", "origin TEXT"),
     ),
     index_sql=(
         """

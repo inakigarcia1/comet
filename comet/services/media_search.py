@@ -503,6 +503,7 @@ async def search_media(
         aliases,
         remove_adult_content,
         is_kitsu=is_kitsu,
+        origin=metadata.get("origin"),
         search_episode=search_episode,
         search_season=search_season,
         cache_media_ids=cache_media_ids,
@@ -626,6 +627,7 @@ async def search_media(
             remove_adult_content,
             target_air_date=target_air_date,
             reject_unknown_episode_files=reject_unknown_episode_files,
+            origin=metadata.get("origin"),
         )
 
         for info_hash, account_torrent in account_torrents.items():

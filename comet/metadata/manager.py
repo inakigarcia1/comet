@@ -22,6 +22,7 @@ _CACHE_SELECT_QUERY = """
         title,
         year,
         year_end,
+        origin,
         aliases_json,
         metadata_updated_at,
         aliases_updated_at
@@ -35,6 +36,7 @@ _CACHE_UPSERT_QUERY = """
         title,
         year,
         year_end,
+        origin,
         aliases_json,
         metadata_updated_at,
         aliases_updated_at
@@ -44,6 +46,7 @@ _CACHE_UPSERT_QUERY = """
         :title,
         :year,
         :year_end,
+        :origin,
         :aliases_json,
         :metadata_updated_at,
         :aliases_updated_at
@@ -64,6 +67,11 @@ _CACHE_UPSERT_QUERY = """
             THEN EXCLUDED.year_end
             ELSE media_metadata_cache.year_end
         END,
+        origin = CASE
+            WHEN :update_origin
+            THEN EXCLUDED.origin
+            ELSE media_metadata_cache.origin
+        END,
         metadata_updated_at = CASE
             WHEN :update_metadata
             THEN EXCLUDED.metadata_updated_at
@@ -83,6 +91,7 @@ _CACHE_UPSERT_QUERY = """
         title,
         year,
         year_end,
+        origin,
         aliases_json,
         metadata_updated_at,
         aliases_updated_at
@@ -189,6 +198,7 @@ class MetadataScraper:
                 "title": row["title"],
                 "year": row["year"],
                 "year_end": row["year_end"],
+                "origin": row["origin"],
                 "season": season,
                 "episode": episode,
             }
@@ -239,6 +249,8 @@ class MetadataScraper:
             "title": metadata["title"] if metadata is not None else None,
             "year": metadata["year"] if metadata is not None else None,
             "year_end": metadata["year_end"] if metadata is not None else None,
+            "origin": metadata.get("origin") if metadata is not None else None,
+            "update_origin": metadata is not None and "origin" in metadata,
             "aliases_json": (
                 encode_json_param(aliases) if aliases is not None else None
             ),
@@ -336,7 +348,10 @@ class MetadataScraper:
         if not metadata:
             return None
 
-        title, year, year_end = metadata
+        title = metadata[0]
+        year = metadata[1]
+        year_end = metadata[2]
+        origin = metadata[3] if len(metadata) > 3 else None
 
         if title is None:  # metadata retrieving failed
             return None
@@ -345,6 +360,7 @@ class MetadataScraper:
             "title": title,
             "year": year,
             "year_end": year_end,
+            "origin": origin,
             "season": season,
             "episode": episode,
         }

@@ -89,6 +89,70 @@ def scrub(t: str):
     return " ".join(normalize_title(t).split())
 
 
+# RTN only lifts these country tokens out of the title. A token before the year
+# or season is a different show ("Law & Order UK"), not a disc region.
+_TITLE_HEAD_SPLIT = re.compile(
+    r"\b(?:(?:19|20)\d{2}|s\d{1,3}(?:e\d{1,3})?|\d{1,2}x\d{1,2})\b",
+    re.IGNORECASE,
+)
+_YEAR_SPAN = re.compile(r"\b(?:19|20)\d{2}\s*[-–]\s*(?:19|20)\d{2}\b")
+_GAME_REPACK = re.compile(r"\b(?:dodi|fitgirl|elamigos)\b", re.IGNORECASE)
+_ORIGIN_PHRASES = {
+    "us": ("united states", "usa", "u.s.a", "u.s."),
+    "uk": ("united kingdom", "great britain", "england"),
+    "au": ("australia",),
+    "ca": ("canada",),
+    "nz": ("new zealand",),
+}
+
+
+def _title_head(raw_title: str) -> str:
+    match = _TITLE_HEAD_SPLIT.search(raw_title)
+    head = raw_title[: match.start()] if match else raw_title
+    return scrub(head)
+
+
+def _country_in_title_head(raw_title: str, country: str | None) -> bool:
+    if not country:
+        return False
+    head = _title_head(raw_title)
+    return re.search(rf"\b{re.escape(country.casefold())}\b", head) is not None
+
+
+def _origin_matches_country(country: str, origin: str | None) -> bool:
+    if not origin:
+        return True
+    phrases = _ORIGIN_PHRASES.get(country.casefold(), (country.casefold(),))
+    text = origin.casefold()
+    return any(phrase in text for phrase in phrases)
+
+
+def release_identity_mismatch(
+    parsed,
+    raw_title: str,
+    *,
+    media_type: str,
+    origin: str | None,
+) -> str | None:
+    country = getattr(parsed, "country", None)
+    if _country_in_title_head(raw_title, country) and not _origin_matches_country(
+        country, origin
+    ):
+        return "spinoff-country"
+
+    if media_type != "movie":
+        return None
+    if getattr(parsed, "seasons", None) or getattr(parsed, "episodes", None):
+        return "series-file"
+    if _YEAR_SPAN.search(raw_title):
+        return "year-span"
+    if _GAME_REPACK.search(raw_title):
+        return "game-repack"
+    if getattr(parsed, "complete", False) and not getattr(parsed, "year", None):
+        return "collection"
+    return None
+
+
 class TitleMatcher:
     """Prepared title/year matcher shared by live and persisted torrents."""
 
@@ -304,6 +368,7 @@ def filter_worker(
     remove_adult_content,
     user_filters=None,
     scope_matches=None,
+    origin=None,
 ):
     results = []
     matcher = TitleMatcher(title, year, year_end, media_type, aliases)
@@ -389,6 +454,19 @@ def filter_worker(
 
             _log_exclusion(
                 f"📅 Rejected (Year Mismatch) | {torrent_title} | Year: {parsed.year} | Expected: {expected}"
+            )
+            continue
+
+        identity = release_identity_mismatch(
+            parsed,
+            torrent_title,
+            media_type=media_type,
+            origin=origin,
+        )
+        if identity:
+            logger.log(
+                "FILTER",
+                f"❌ Rejected ({identity}) | {torrent_title} | Expected: {title}",
             )
             continue
 

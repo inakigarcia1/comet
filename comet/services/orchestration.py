@@ -9,7 +9,7 @@ from comet.core.models import CometSettingsModel, database, settings
 from comet.core.scrape import ScrapeContext
 from comet.scrapers.manager import scraper_manager
 from comet.scrapers.models import ScrapeRequest
-from comet.services.filtering import filter_worker
+from comet.services.filtering import filter_worker, release_identity_mismatch
 from comet.services.ranking import rank_worker
 from comet.services.torrent_manager import torrent_update_queue
 from comet.utils.languages import select_indexer_titles
@@ -77,6 +77,7 @@ class TorrentManager:
         reject_unknown_episode_files: bool = False,
         media_scope: MediaScope | None = None,
         user_filters=None,
+        origin: str | None = None,
     ):
         self.media_type = media_type
         self.media_id = media_full_id
@@ -103,6 +104,7 @@ class TorrentManager:
         self.target_air_date = target_air_date
         self.reject_unknown_episode_files = reject_unknown_episode_files
         self.user_filters = user_filters
+        self.origin = origin
 
         self.seen_hashes = set()
         self.torrents = {}
@@ -278,6 +280,19 @@ class TorrentManager:
                 else None
             )
             if not is_manual:
+                identity = release_identity_mismatch(
+                    parsed_data,
+                    row["title"],
+                    media_type=self.media_type,
+                    origin=self.origin,
+                )
+                if identity:
+                    logger.log(
+                        "FILTER",
+                        f"❌ Rejected ({identity}) | {row['title']} | Expected: {self.title}",
+                    )
+                    continue
+
                 target_season = self.search_season
                 if (
                     target_season is not None
@@ -428,6 +443,7 @@ class TorrentManager:
                 self.remove_adult_content,
                 self.user_filters,
                 self._scope_matches_torrent,
+                self.origin,
             )
             for i in range(0, len(new_torrents), chunk_size)
         ]

@@ -999,6 +999,14 @@ async def _migration_media_demand_scrape_coverage(ctx: MigrationContext):
     return True
 
 
+async def _migration_media_origin(ctx: MigrationContext):
+    await _ensure_managed_table(ctx, MEDIA_METADATA_CACHE_TABLE_SPEC)
+    await ctx.database.execute(
+        "UPDATE media_metadata_cache SET metadata_updated_at = NULL"
+    )
+    return True
+
+
 MIGRATIONS = [
     ("2026030901_foundation", _migration_foundation),
     ("2026030902_backfill_canonical_tables", _migration_backfill_canonical_tables),
@@ -1024,4 +1032,5 @@ MIGRATIONS = [
     ),
     ("2026072701_imdb_title_lookup", _migration_imdb_title_lookup),
     ("2026081801_torrents_is_manual", _migration_torrents_is_manual),
+    ("2026092401_media_origin", _migration_media_origin),
 ]

@@ -26,11 +26,17 @@ class ImdbMetadataTests(unittest.TestCase):
     def test_cinemeta_extractor_requires_current_meta_object(self):
         self.assertEqual(
             _extract_cinemeta_metadata({"meta": []}),
-            (None, None, None),
+            (None, None, None, None),
         )
         self.assertEqual(
             _extract_cinemeta_metadata(
-                {"meta": {"name": "Valid", "releaseInfo": "2024-2026"}}
+                {
+                    "meta": {
+                        "name": "Valid",
+                        "releaseInfo": "2024-2026",
+                        "country": "United States",
+                    }
+                }
             ),
-            ("Valid", 2024, 2026),
+            ("Valid", 2024, 2026, "United States"),
         )
