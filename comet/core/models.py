@@ -1306,6 +1306,7 @@ class ConfigModel(BaseModel):
     debridStreamProxyPassword: str | None = ""
     languages: dict | None = rtn_settings_default_dumped["languages"]
     resolutions: dict | None = rtn_settings_default_dumped["resolutions"]
+    playbackCapabilities: dict | None = None
     options: dict | None = rtn_settings_default_dumped["options"]
     rtnSettings: CometSettingsModel | None = rtn_settings_default
     rtnRanking: DefaultRanking | None = rtn_ranking_default

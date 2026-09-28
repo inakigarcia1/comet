@@ -15,6 +15,11 @@ from typing import Any
 
 from RTN import ParsedData
 
+from comet.services.playback_capabilities import (
+    playback_capabilities_active,
+    torrent_title_allowed,
+)
+
 _MAX_BYTES = 0
 _GB = 1024**3
 
@@ -161,6 +166,22 @@ class BitrateFilter:
         )
 
 
+class PlaybackCapabilitiesFilter:
+    """Device playback constraints derived from the addon request."""
+
+    __slots__ = ("_capabilities",)
+
+    def __init__(self, capabilities: Mapping[str, Any] | None):
+        self._capabilities = capabilities if isinstance(capabilities, Mapping) else None
+
+    @property
+    def is_active(self) -> bool:
+        return playback_capabilities_active(self._capabilities)
+
+    def matches(self, torrent_title: str) -> bool:
+        return torrent_title_allowed(torrent_title, self._capabilities)
+
+
 class UserFilters:
     """Aggregate container. Each filter is independently optional."""
 
@@ -170,16 +191,19 @@ class UserFilters:
         filename: FilenameFilter,
         release_type: ReleaseTypeFilter,
         bitrate: BitrateFilter,
+        playback: PlaybackCapabilitiesFilter,
     ):
         self.filename = filename
         self.release_type = release_type
         self.bitrate = bitrate
+        self.playback = playback
 
     def any_active(self) -> bool:
         return (
             self.filename.is_active
             or self.release_type.is_active
             or self.bitrate.is_active
+            or self.playback.is_active
         )
 
     def filter_torrent(
@@ -190,13 +214,15 @@ class UserFilters:
     ) -> bool:
         if not self.any_active():
             return True
+        title = torrent.get("title", "")
         return (
-            self.filename.matches(torrent.get("title", ""))
+            self.filename.matches(title)
             and self.release_type.matches(torrent.get("parsed"))
             and self.bitrate.matches(
                 torrent.get("size"),
                 scope_matches=scope_matches,
             )
+            and self.playback.matches(title)
         )
 
 
@@ -219,6 +245,7 @@ def build_user_filters(
             config.get("maxBitrateMbps"),
             duration_minutes,
         ),
+        playback=PlaybackCapabilitiesFilter(config.get("playbackCapabilities")),
     )
 
 
