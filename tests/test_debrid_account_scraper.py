@@ -1,4 +1,6 @@
+import ast
 import asyncio
+import inspect
 import sqlite3
 import tempfile
 import unittest
@@ -190,3 +192,33 @@ class DebridAccountTaskTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(realdebrid_started.is_set())
         self.assertTrue(alldebrid_started.is_set())
+
+
+class AccountFilterWorkerCallTests(unittest.TestCase):
+    def test_snapshot_match_calls_filter_worker_with_its_current_signature(self):
+        source = Path(account_scraper.__file__).read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        worker_args = None
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if not isinstance(func, ast.Attribute) or func.attr != "run_in_executor":
+                continue
+            if not any(
+                isinstance(arg, ast.Name) and arg.id == "filter_worker" for arg in node.args
+            ):
+                continue
+            worker_args = len(node.args) - 2
+            break
+
+        positional = [
+            parameter
+            for parameter in inspect.signature(account_scraper.filter_worker).parameters.values()
+            if parameter.kind
+            in (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            )
+        ]
+        self.assertEqual(worker_args, len(positional))

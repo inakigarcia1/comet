@@ -673,8 +673,6 @@ async def get_account_torrents_for_media(
             media_type,
             aliases,
             remove_adult_content,
-            None,
-            None,
             origin,
             target_air_date,
         )
