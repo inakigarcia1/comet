@@ -75,6 +75,12 @@ async def mark_scope_scraped(media_id: str) -> None:
     await _upsert_scope_demand(media_id, scraped=True)
 
 
+# Scrapes before this wrote the shared torrent cache through per-request
+# filters. search_media counts torrents after those filters: an empty visible
+# list is EMPTY (foreground scrape) and a non-empty one is STALE (background).
+CACHE_ADMISSION_EPOCH = 1790702763
+
+
 class CacheState(Enum):
     FRESH = "fresh"
     STALE = "stale"
@@ -124,7 +130,7 @@ class CacheStateManager:
 
     @staticmethod
     def _is_scope_fresh(last_scraped_at: float | None) -> bool:
-        if last_scraped_at is None:
+        if last_scraped_at is None or last_scraped_at < CACHE_ADMISSION_EPOCH:
             return False
         if settings.LIVE_TORRENT_CACHE_TTL < 0:
             return True

@@ -477,8 +477,6 @@ def filter_worker(
     media_type,
     aliases,
     remove_adult_content,
-    user_filters=None,
-    scope_matches=None,
     origin=None,
     air_date=None,
 ):
@@ -591,17 +589,7 @@ def filter_worker(
             continue
 
         torrent["parsed"] = parsed
-
-        if user_filters is not None and user_filters.any_active():
-            scope_ok = True
-            if scope_matches is not None:
-                try:
-                    scope_ok = bool(scope_matches(torrent))
-                except Exception:
-                    scope_ok = True
-            if not user_filters.filter_torrent(torrent, scope_matches=scope_ok):
-                _log_exclusion(f"🎛️ Rejected (User Filter) | {torrent_title}")
-                continue
-
+        # Per-request filters (bitrate, playback, filename, release type) stay
+        # out of this list. It is what gets written to the shared torrent cache.
         results.append(torrent)
     return results

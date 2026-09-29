@@ -7,7 +7,12 @@ from databases import Database
 
 from comet.core.db_router import ReplicaAwareDatabase
 from comet.services import cache_state
-from comet.services.cache_state import CacheState, CacheStateManager, ScrapeDecision
+from comet.services.cache_state import (
+    CACHE_ADMISSION_EPOCH,
+    CacheState,
+    CacheStateManager,
+    ScrapeDecision,
+)
 
 
 class CacheStateManagerTests(unittest.IsolatedAsyncioTestCase):
@@ -28,15 +33,16 @@ class CacheStateManagerTests(unittest.IsolatedAsyncioTestCase):
     async def test_fresh_exact_scope_uses_reusable_results(self):
         manager = CacheStateManager("tt123:2")
 
+        scraped_at = CACHE_ADMISSION_EPOCH + 10
         with (
-            patch.object(manager, "register_demand", return_value=1_000),
-            patch("comet.services.cache_state.time.time", return_value=1_001),
+            patch.object(manager, "register_demand", return_value=scraped_at),
+            patch("comet.services.cache_state.time.time", return_value=scraped_at + 1),
         ):
             result = await manager.check_and_decide(torrent_count=15)
 
         self.assertEqual(result.state, CacheState.FRESH)
         self.assertEqual(result.decision, ScrapeDecision.USE_CACHE)
-        self.assertEqual(result.scope_scraped_at, 1_000)
+        self.assertEqual(result.scope_scraped_at, scraped_at)
 
     async def test_stale_exact_scope_refreshes_in_background(self):
         manager = CacheStateManager("tt123:2")
@@ -49,6 +55,29 @@ class CacheStateManagerTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.state, CacheState.STALE)
         self.assertEqual(result.decision, ScrapeDecision.SCRAPE_BACKGROUND)
+
+    async def test_scope_scraped_before_admission_epoch_is_not_fresh(self):
+        manager = CacheStateManager("tt123:2")
+
+        with (
+            patch.object(
+                manager,
+                "register_demand",
+                return_value=CACHE_ADMISSION_EPOCH - 5,
+            ),
+            patch(
+                "comet.services.cache_state.time.time",
+                return_value=CACHE_ADMISSION_EPOCH + 30,
+            ),
+            patch.object(manager, "_try_acquire_lock", return_value=True),
+        ):
+            hidden = await manager.check_and_decide(torrent_count=0)
+            visible = await manager.check_and_decide(torrent_count=3)
+
+        self.assertEqual(hidden.state, CacheState.EMPTY)
+        self.assertEqual(hidden.decision, ScrapeDecision.SCRAPE_FOREGROUND)
+        self.assertEqual(visible.state, CacheState.STALE)
+        self.assertEqual(visible.decision, ScrapeDecision.SCRAPE_BACKGROUND)
 
     async def test_demand_write_failure_is_visible_and_non_fatal(self):
         manager = CacheStateManager("tt123:2")

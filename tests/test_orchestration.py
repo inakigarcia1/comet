@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from comet.core.scrape import ScrapeContext
 from comet.services.orchestration import TorrentManager, scraper_manager, settings
+from comet.services.user_filters import build_user_filters
 
 
 class TorrentOrchestrationTests(unittest.IsolatedAsyncioTestCase):
@@ -122,6 +123,49 @@ class TorrentOrchestrationTests(unittest.IsolatedAsyncioTestCase):
             await manager.filter_manager("ThirdParty", None)
 
         self.assertEqual(manager.ready_to_cache, [valid])
+
+    async def test_bitrate_cap_filters_the_response_and_not_the_cache(self):
+        manager = TorrentManager(
+            media_type="series",
+            media_full_id="tt0098844:1:1",
+            media_only_id="tt0098844",
+            title="Law & Order",
+            year=1990,
+            year_end=None,
+            season=1,
+            episode=1,
+            aliases={},
+            remove_adult_content=False,
+            user_filters=build_user_filters(
+                {"maxBitrateMbps": 0.85},
+                duration_minutes=22,
+            ),
+        )
+        title = "Law.and.Order.S01E01.1080p.WEB-DL"
+        playable = {
+            "title": title,
+            "infoHash": "a" * 40,
+            "fileIndex": 0,
+            "seeders": 5,
+            "size": 120 * 1024 * 1024,
+            "tracker": "Test",
+            "sources": [],
+        }
+        oversized = {
+            **playable,
+            "infoHash": "b" * 40,
+            "size": 5 * 1024**3,
+        }
+
+        await manager.filter_manager("Test", [playable, oversized])
+
+        self.assertEqual(
+            {item["infoHash"] for item in manager.ready_to_cache},
+            {playable["infoHash"], oversized["infoHash"]},
+        )
+        for item in manager.ready_to_cache:
+            manager._remember_live_torrent(item)
+        self.assertEqual(set(manager.torrents), {playable["infoHash"]})
 
     async def test_scrape_waits_until_cache_updates_are_enqueued(self):
         manager = TorrentManager(

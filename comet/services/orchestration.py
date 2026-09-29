@@ -119,28 +119,6 @@ class TorrentManager:
         self.primary_cached = False
         self.live_result_timestamp = time.time()
 
-    def _scope_matches_torrent(self, torrent: dict) -> bool:
-        """Return True if the torrent's parsed payload matches the requested
-        media scope (movie / series / season / episode)."""
-        parsed = torrent.get("parsed")
-        if parsed is None:
-            return True
-        try:
-            parsed = ensure_multi_language(parsed)
-        except Exception:
-            return True
-        try:
-            return self.media_scope.matches_parsed(
-                parsed,
-                self.search_season,
-                self.search_episode,
-                target_air_date=self.target_air_date,
-                reject_unknown_episode_files=self.reject_unknown_episode_files,
-                scope_is_known=True,
-            )
-        except Exception:
-            return True
-
     def _matches_requested_scope(
         self,
         parsed: ParsedData,
@@ -198,20 +176,30 @@ class TorrentManager:
         await self.cache_torrents()
 
         for torrent in self.ready_to_cache:
-            if not self._matches_requested_scope(torrent["parsed"]):
-                continue
+            self._remember_live_torrent(torrent)
 
-            info_hash = torrent["infoHash"]
-            self.torrents[info_hash] = {
-                "fileIndex": torrent["fileIndex"],
-                "title": torrent["title"],
-                "seeders": torrent["seeders"],
-                "size": torrent["size"],
-                "tracker": torrent["tracker"],
-                "sources": torrent["sources"],
-                "parsed": torrent["parsed"],
-                "updatedAt": self.live_result_timestamp,
-            }
+    def _remember_live_torrent(self, torrent: dict) -> None:
+        parsed = torrent.get("parsed")
+        if parsed is None or not self._matches_requested_scope(parsed):
+            return
+        if (
+            self.user_filters is not None
+            and self.user_filters.any_active()
+            and not self.user_filters.filter_torrent(torrent, scope_matches=True)
+        ):
+            return
+
+        info_hash = torrent["infoHash"]
+        self.torrents[info_hash] = {
+            "fileIndex": torrent["fileIndex"],
+            "title": torrent["title"],
+            "seeders": torrent["seeders"],
+            "size": torrent["size"],
+            "tracker": torrent["tracker"],
+            "sources": torrent["sources"],
+            "parsed": parsed,
+            "updatedAt": self.live_result_timestamp,
+        }
 
     async def _fetch_cached_rows(self, media_id: str):
         where_clause, params = build_torrent_cache_where(
@@ -475,8 +463,6 @@ class TorrentManager:
                 self.media_type,
                 self.aliases,
                 self.remove_adult_content,
-                self.user_filters,
-                self._scope_matches_torrent,
                 self.origin,
                 self.target_air_date,
             )

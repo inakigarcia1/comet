@@ -94,8 +94,10 @@ def merge_service_cache_status(target: dict, incoming: dict):
                 cache_map[service] = False
 
 
-async def _mark_scope_scraped_if_populated(media_id: str, torrents: dict) -> None:
-    if torrents:
+async def _mark_scope_scraped_if_populated(media_id: str, torrent_manager) -> None:
+    # ready_to_cache is the shared scrape. self.torrents is that scrape after
+    # this request's filters, so an empty response must still count as scraped.
+    if torrent_manager.ready_to_cache or torrent_manager.torrents:
         await mark_scope_scraped(media_id)
 
 
@@ -172,7 +174,7 @@ async def background_scrape(
 
     try:
         await scrape_lock.run(run_scrape())
-        await _mark_scope_scraped_if_populated(media_id, torrent_manager.torrents)
+        await _mark_scope_scraped_if_populated(media_id, torrent_manager)
         logger.log("SCRAPER", f"📥 Background scrape complete for {media_id}!")
     except Exception as exc:
         logger.log("SCRAPER", f"❌ Background scrape failed for {media_id}: {exc}")
@@ -597,7 +599,7 @@ async def search_media(
                 account_snapshot_ready = True
             else:
                 await torrent_manager.scrape_torrents(ScrapeContext.LIVE)
-            await _mark_scope_scraped_if_populated(media_id, torrent_manager.torrents)
+            await _mark_scope_scraped_if_populated(media_id, torrent_manager)
             logger.log(
                 "SCRAPER",
                 "📥 Torrents after global RTN filtering: "

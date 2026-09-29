@@ -30,12 +30,13 @@ cam, screener, telecine, telesync, unknown
 ### Orden de filtros
 
 ```
-parse -> title/year/adult -> user_filters ->
-  - max size (per-tipo)
+parse -> title/year/adult/min size -> cache compartida
+al responder (no al escribir la cache):
   - filename include/exclude
   - release type allow/block
   - bitrate (cuando hay durationMinutes)
-rank_torrents (RTN) -> cache ->
+  - playback capabilities
+rank_torrents (RTN, max size) ->
 _select_info_hashes_by_resolution (maxResultsPerResolution, ultimo)
 ```
 
