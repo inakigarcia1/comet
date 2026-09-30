@@ -14,6 +14,7 @@ from comet.metadata.filter import release_filter
 from comet.metadata.manager import MetadataScraper
 from comet.observability import metrics
 from comet.services.anime import anime_mapper
+from comet.services.cache_admission import count_resolutions, format_counts
 from comet.services.cache_state import CacheStateManager, mark_scope_scraped
 from comet.services.debrid import DebridService
 from comet.services.debrid_account_scraper import (
@@ -57,6 +58,11 @@ class MediaSearchResult:
     sort_mixed: bool = False
     show_account_sync_trigger: bool = False
     use_account_scrape: bool = False
+    stored_resolutions: dict = field(default_factory=dict)
+    visible_resolutions: dict = field(default_factory=dict)
+    wrote_resolutions: dict = field(default_factory=dict)
+    scraped: bool = False
+    cache_decision: str = ""
 
 
 def episode_matching_policy(
@@ -82,6 +88,15 @@ def episode_matching_policy(
         is_imdb_episode_request and not allow_debrid_verified_season_packs
     )
     return is_imdb_episode_request, reject_unknown_episode_files
+
+
+def _attach_cache_trace(result, manager, *, scraped: bool, decision: str):
+    result.stored_resolutions = dict(manager.cached_unfiltered_counts)
+    result.visible_resolutions = count_resolutions(manager.torrents.values())
+    result.wrote_resolutions = dict(manager.cache_write_counts)
+    result.scraped = scraped
+    result.cache_decision = decision
+    return result
 
 
 def merge_service_cache_status(target: dict, incoming: dict):
@@ -516,11 +531,17 @@ async def search_media(
     )
 
     await torrent_manager.get_cached_torrents()
+    unfiltered_count = sum(torrent_manager.cached_unfiltered_counts.values())
     torrent_count = len(torrent_manager.torrents)
-    cache_state = "hit" if torrent_count else "miss"
-    metrics.observe_torrent_cache(media_type, cache_state, torrent_count)
+    cache_state = "hit" if unfiltered_count else "miss"
+    metrics.observe_torrent_cache(media_type, cache_state, unfiltered_count)
     initial_info_hashes = set(torrent_manager.torrents)
-    logger.log("SCRAPER", f"📦 Found cached torrents: {torrent_count}")
+    logger.log(
+        "SCRAPER",
+        "📦 Found cached torrents: "
+        f"{unfiltered_count} stored, {torrent_count} after client filters "
+        f"({format_counts(torrent_manager.cached_unfiltered_counts)})",
+    )
 
     if (
         user_filters.filename.is_active
@@ -536,7 +557,11 @@ async def search_media(
         torrent_manager._force_filename_refresh = True
 
     cache_manager = CacheStateManager(media_id)
-    cache_result = await cache_manager.check_and_decide(torrent_count)
+    # Freshness follows the unfiltered rows. A client filter that hides 4K
+    # must not look like an empty cache, and must not skip a re-scrape that
+    # the stored set itself still needs.
+    cache_result = await cache_manager.check_and_decide(unfiltered_count)
+    did_scrape = False
     force_scrape_now = not torrent_manager.primary_cached or getattr(
         torrent_manager, "_force_filename_refresh", False
     )
@@ -554,18 +579,23 @@ async def search_media(
             "SCRAPER",
             f"🔄 Another instance is scraping {log_title}, returning early",
         )
-        return MediaSearchResult(
-            MediaSearchStatus.BUSY,
-            metadata=metadata,
-            aliases=aliases,
-            media_scope=media_scope,
-            cache_state=cache_state,
-            media_only_id=media_only_id,
-            search_season=search_season,
-            search_episode=search_episode,
-            is_torrent_only=is_torrent_only,
-            sort_mixed=sort_mixed,
-            use_account_scrape=use_account_scrape,
+        return _attach_cache_trace(
+            MediaSearchResult(
+                MediaSearchStatus.BUSY,
+                metadata=metadata,
+                aliases=aliases,
+                media_scope=media_scope,
+                cache_state=cache_state,
+                media_only_id=media_only_id,
+                search_season=search_season,
+                search_episode=search_episode,
+                is_torrent_only=is_torrent_only,
+                sort_mixed=sort_mixed,
+                use_account_scrape=use_account_scrape,
+            ),
+            torrent_manager,
+            scraped=False,
+            decision=cache_result.decision.value,
         )
 
     if cache_result.should_scrape_background and not force_scrape_now:
@@ -584,6 +614,7 @@ async def search_media(
         )
 
     if cache_result.should_scrape_now or force_scrape_now:
+        did_scrape = True
         logger.log("SCRAPER", f"🔎 Starting new search for {log_title}")
         try:
             if use_account_scrape:
@@ -759,21 +790,26 @@ async def search_media(
         f"{len(torrent_manager.ranked_torrents)}/{initial_torrent_count}",
     )
 
-    return MediaSearchResult(
-        MediaSearchStatus.OK,
-        metadata=metadata,
-        aliases=aliases,
-        media_scope=media_scope,
-        torrents=torrent_manager.torrents,
-        ranked_info_hashes=list(torrent_manager.ranked_torrents),
-        service_cache_status=service_cache_status,
-        debrid_errors=debrid_errors,
-        cache_state=cache_state,
-        media_only_id=media_only_id,
-        search_season=search_season,
-        search_episode=search_episode,
-        is_torrent_only=is_torrent_only,
-        sort_mixed=sort_mixed,
-        show_account_sync_trigger=use_account_scrape,
-        use_account_scrape=use_account_scrape,
+    return _attach_cache_trace(
+        MediaSearchResult(
+            MediaSearchStatus.OK,
+            metadata=metadata,
+            aliases=aliases,
+            media_scope=media_scope,
+            torrents=torrent_manager.torrents,
+            ranked_info_hashes=list(torrent_manager.ranked_torrents),
+            service_cache_status=service_cache_status,
+            debrid_errors=debrid_errors,
+            cache_state=cache_state,
+            media_only_id=media_only_id,
+            search_season=search_season,
+            search_episode=search_episode,
+            is_torrent_only=is_torrent_only,
+            sort_mixed=sort_mixed,
+            show_account_sync_trigger=use_account_scrape,
+            use_account_scrape=use_account_scrape,
+        ),
+        torrent_manager,
+        scraped=did_scrape,
+        decision=cache_result.decision.value,
     )

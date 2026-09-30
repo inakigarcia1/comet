@@ -15,6 +15,7 @@ from comet.api.models.manual_torrent import (
 from comet.background_scraper.worker import background_scraper
 from comet.core.logger import log_capture, logger
 from comet.core.models import database, settings
+from comet.services.cache_invalidate import invalidate_for_scope, parse_invalidate_body
 from comet.services.admin_manual_torrents import (
     delete_manual,
     insert_manual,
@@ -181,6 +182,39 @@ async def admin_logout():
     response = RedirectResponse("/admin", status_code=303)
     response.delete_cookie(ADMIN_SESSION_COOKIE)
     return response
+
+
+@router.post(
+    "/admin/api/cache/invalidate",
+    tags=["Admin"],
+    summary="Invalidate torrent cache for a movie, series, season or episode",
+)
+async def admin_invalidate_cache(
+    request: Request,
+    admin_session: str = Cookie(None, description="Admin session token"),
+):
+    require_admin_auth(admin_session)
+    try:
+        body = orjson.loads(await request.body())
+    except orjson.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="invalid json") from None
+    spec = parse_invalidate_body(body)
+    if spec is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Elegí película, serie, temporada o capítulo, con un imdb id tt… y temporada/capítulo si hace falta",
+        )
+
+    deleted = await invalidate_for_scope(spec)
+    logger.log(
+        "SCRAPER",
+        "CACHE INVALIDATE "
+        f"scope={deleted['scope']} media={deleted['mediaId']} "
+        f"season={deleted['season']} episode={deleted['episode']} "
+        f"torrents={deleted['torrents']} demand={deleted['demand']} "
+        f"seasons={deleted['seasons']}",
+    )
+    return JSONResponse(deleted)
 
 
 @router.get(

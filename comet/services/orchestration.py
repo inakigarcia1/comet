@@ -9,6 +9,7 @@ from comet.core.models import CometSettingsModel, database, settings
 from comet.core.scrape import ScrapeContext
 from comet.scrapers.manager import scraper_manager
 from comet.scrapers.models import ScrapeRequest
+from comet.services.cache_admission import cap_per_resolution, count_resolutions, resolution_of
 from comet.services.filtering import (
     TitleMatcher,
     _log_exclusion,
@@ -115,6 +116,8 @@ class TorrentManager:
         self.seen_hashes = set()
         self.torrents = {}
         self.ready_to_cache = []
+        self.cached_unfiltered_counts = {}
+        self.cache_write_counts = {}
         self.ranked_torrents = {}
         self.primary_cached = False
         self.live_result_timestamp = time.time()
@@ -330,6 +333,10 @@ class TorrentManager:
                 ):
                     continue
 
+            resolution = resolution_of(parsed_data)
+            self.cached_unfiltered_counts[resolution] = (
+                self.cached_unfiltered_counts.get(resolution, 0) + 1
+            )
             info_hash = row["info_hash"]
             torrent_entry = {
                 "fileIndex": row["file_index"],
@@ -398,6 +405,10 @@ class TorrentManager:
             )
 
     async def cache_torrents(self):
+        # Client maxResultsPerResolution is not an input here. The shared cache
+        # keeps a fixed number per resolution from the unfiltered scrape.
+        self.ready_to_cache = cap_per_resolution(self.ready_to_cache)
+        self.cache_write_counts = count_resolutions(self.ready_to_cache)
         file_infos = []
         for torrent in self.ready_to_cache:
             self._append_cache_file_infos(file_infos, torrent)

@@ -4,10 +4,13 @@ from urllib.parse import quote
 from fastapi import APIRouter, BackgroundTasks, Query, Request
 
 from comet.core.config_validation import config_check
+from comet.core.logger import logger
 from comet.core.models import settings
 from comet.debrid.manager import get_debrid_extension
 from comet.observability import metrics
+from comet.services.cache_admission import CACHE_RESULTS_PER_RESOLUTION, format_counts
 from comet.services.media_search import MediaSearchStatus, search_media
+from comet.services.trace import current_trace, set_trace
 from comet.services.trackers import trackers
 from comet.utils.cache import CachePolicies, cached_json_response
 from comet.utils.formatting import (
@@ -32,6 +35,52 @@ RESOLUTION_TO_DIMENSIONS = {
     "360P": (360, 480),
     "240P": (240, 320),
 }
+
+
+def _disabled_resolutions(config) -> str:
+    resolutions = config.get("resolutions") or {}
+    if not isinstance(resolutions, dict):
+        return "-"
+    disabled = [str(key) for key, enabled in resolutions.items() if enabled is False]
+    return ",".join(disabled) or "-"
+
+
+def _playback_summary(config) -> str:
+    playback = config.get("playbackCapabilities") or {}
+    if not isinstance(playback, dict) or not playback:
+        return "-"
+    parts = []
+    screen = playback.get("screen") or {}
+    if isinstance(screen, dict) and screen.get("width") and screen.get("height"):
+        parts.append(f"{screen.get('width')}x{screen.get('height')}")
+    codecs = playback.get("codecs") or []
+    if isinstance(codecs, list) and codecs:
+        parts.append("codecs=" + "|".join(str(codec) for codec in codecs))
+    if playback.get("decoderCapabilities"):
+        parts.append("decoder=yes")
+    backend = playback.get("playerBackend")
+    if backend:
+        parts.append(f"player={backend}")
+    return " ".join(parts) or "yes"
+
+
+def _log_search_trace(config, result, duration_minutes) -> None:
+    title = (result.metadata or {}).get("title") or "-"
+    logger.log(
+        "SCRAPER",
+        f"TRACE {current_trace()} media={result.media_only_id or '-'} title={title} "
+        f"status={result.status.value} cache={result.cache_state} "
+        f"decision={result.cache_decision or '-'} scraped={str(result.scraped).lower()} "
+        f"filtersOnSearch=none filtersOnCacheWrite=none "
+        f"cacheCap={CACHE_RESULTS_PER_RESOLUTION} "
+        f"clientMax={config.get('maxResultsPerResolution')} "
+        f"stored={format_counts(result.stored_resolutions)} "
+        f"wrote={format_counts(result.wrote_resolutions)} "
+        f"afterClientFilters={format_counts(result.visible_resolutions)} "
+        f"excludedResolutions={_disabled_resolutions(config)} "
+        f"bitrateMax={config.get('maxBitrateMbps') or 0} "
+        f"durationMin={duration_minutes or 0} playback={_playback_summary(config)}",
+    )
 
 
 def _first_meta_value(value):
@@ -228,7 +277,9 @@ async def stream(
         ),
     ),
 ):
+    set_trace(request.headers.get("x-trace-id"))
     if media_type not in ["movie", "series"]:
+        logger.log("SCRAPER", f"TRACE {current_trace()} status=rejected media_type={media_type}")
         return _build_stream_response(request, {"streams": []}, is_empty=True)
 
     if "tmdb:" in media_id:
@@ -236,6 +287,7 @@ async def stream(
 
     config = config_check(b64config, strict_b64config=True)
     if not config:
+        logger.log("SCRAPER", f"TRACE {current_trace()} status=invalid_config media={media_id}")
         error_response = {
             "streams": [
                 {
@@ -290,6 +342,7 @@ async def stream(
         background_tasks.add_task,
         duration_minutes=duration_minutes,
     )
+    _log_search_trace(config, search_result, duration_minutes)
     stream_cache_state = search_result.cache_state
 
     if search_result.status is MediaSearchStatus.INVALID:
@@ -573,6 +626,17 @@ async def stream(
         final_streams = cached_results
     else:
         final_streams = cached_results + non_cached_results
+
+    returned_counts = {}
+    for info_hash in ranked_info_hashes:
+        parsed = torrents[info_hash]["parsed"]
+        key = str(getattr(parsed, "resolution", None) or "unknown") or "unknown"
+        returned_counts[key] = returned_counts.get(key, 0) + 1
+    logger.log(
+        "SCRAPER",
+        f"TRACE {current_trace()} returned={format_counts(returned_counts)} "
+        f"streams={len(final_streams)}",
+    )
 
     has_results = len(final_streams) > 0
 

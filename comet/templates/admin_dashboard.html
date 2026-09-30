@@ -2115,6 +2115,51 @@
                     </div>
                   </div>
                 </div>
+                <div class="metric-section" style="margin-top: 20px">
+                  <h3>
+                    <sl-icon name="trash"></sl-icon> Invalidar caché
+                  </h3>
+                  <p style="color: var(--sl-color-neutral-600); margin: 0 0 12px">
+                    Borra lo guardado y obliga a buscar de nuevo. No hace falta saber
+                    cuántas temporadas o capítulos hay: se borra todo lo que esté
+                    guardado para esa película, esa serie, esa temporada o ese capítulo,
+                    aunque haya huecos en la numeración.
+                  </p>
+                  <div style="display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap">
+                    <sl-select id="cache-scope" label="Qué borrar" value="movie" style="min-width: 260px">
+                      <sl-option value="movie">Película</sl-option>
+                      <sl-option value="series">Serie (todas las temporadas)</sl-option>
+                      <sl-option value="season">Temporada</sl-option>
+                      <sl-option value="episode">Capítulo</sl-option>
+                    </sl-select>
+                    <sl-input
+                      id="cache-media-id"
+                      label="IMDB id"
+                      placeholder="tt0111161"
+                      style="min-width: 180px"
+                    ></sl-input>
+                    <sl-input
+                      id="cache-season"
+                      type="number"
+                      min="0"
+                      label="Temporada"
+                      placeholder="1"
+                      style="width: 140px; display: none"
+                    ></sl-input>
+                    <sl-input
+                      id="cache-episode"
+                      type="number"
+                      min="0"
+                      label="Capítulo"
+                      placeholder="1"
+                      style="width: 140px; display: none"
+                    ></sl-input>
+                    <sl-button id="cache-invalidate" variant="danger" onclick="invalidateTorrentCache()">
+                      Invalidar caché
+                    </sl-button>
+                    <span id="cache-invalidate-status"></span>
+                  </div>
+                </div>
               </div>
             </div>
           </sl-tab-panel>
@@ -2521,6 +2566,54 @@
           const container = document.getElementById("system-update-status");
           container.innerHTML = `<div style="text-align: center; color: var(--sl-color-danger-500);">Error checking updates.</div>`;
           console.error(e);
+        }
+      }
+
+      function syncCacheInvalidateFields() {
+        const scope = document.getElementById("cache-scope").value;
+        const season = document.getElementById("cache-season");
+        const episode = document.getElementById("cache-episode");
+        const needsSeason = scope === "season" || scope === "episode";
+        season.style.display = needsSeason ? "" : "none";
+        episode.style.display = scope === "episode" ? "" : "none";
+      }
+
+      document.getElementById("cache-scope").addEventListener("sl-change", syncCacheInvalidateFields);
+
+      async function invalidateTorrentCache() {
+        const status = document.getElementById("cache-invalidate-status");
+        const scope = document.getElementById("cache-scope").value;
+        const mediaId = (document.getElementById("cache-media-id").value || "").trim();
+        const seasonRaw = (document.getElementById("cache-season").value || "").trim();
+        const episodeRaw = (document.getElementById("cache-episode").value || "").trim();
+        const payload = { scope, mediaId };
+        if (scope === "season" || scope === "episode") payload.season = Number(seasonRaw);
+        if (scope === "episode") payload.episode = Number(episodeRaw);
+        status.textContent = "Borrando...";
+        try {
+          const response = await fetch("/admin/api/cache/invalidate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            status.textContent = body.detail || "No se pudo invalidar";
+            return;
+          }
+          const seasons = Array.isArray(body.seasons) && body.seasons.length
+            ? " Temporadas: " + body.seasons.join(", ") + "."
+            : "";
+          status.textContent =
+            "Listo. Torrents borrados: " +
+            body.torrents +
+            ". Marcas de búsqueda borradas: " +
+            body.demand +
+            "." +
+            seasons;
+        } catch (error) {
+          status.textContent = "Error de red";
+          console.error(error);
         }
       }
 
