@@ -167,6 +167,67 @@ class TorrentOrchestrationTests(unittest.IsolatedAsyncioTestCase):
             manager._remember_live_torrent(item)
         self.assertEqual(set(manager.torrents), {playable["infoHash"]})
 
+    async def test_playback_score_filters_the_response_and_not_the_cache(self):
+        device = {
+            "screen": {"width": 3840, "height": 2160},
+            "video": {
+                "hevc": {
+                    "profiles": ["Main"],
+                    "bitDepths": [8],
+                    "maxWidth": 3840,
+                    "maxHeight": 2160,
+                },
+                "avc": {
+                    "profiles": ["High"],
+                    "bitDepths": [8],
+                    "maxWidth": 1920,
+                    "maxHeight": 1080,
+                },
+            },
+            "decoderCapabilities": {
+                "video/hevc": {"2160p30": True},
+                "video/avc": {"1080p30": True},
+            },
+            "hdr": {"hdr10": False, "dolbyVision": False, "probed": True},
+        }
+        manager = TorrentManager(
+            media_type="series",
+            media_full_id="tt0098844:1:1",
+            media_only_id="tt0098844",
+            title="Law & Order",
+            year=1990,
+            year_end=None,
+            season=1,
+            episode=1,
+            aliases={},
+            remove_adult_content=False,
+            user_filters=build_user_filters({"playbackCapabilities": device}),
+        )
+        playable = {
+            "title": "Law.and.Order.S01E01.1080p.WEB-DL.x264.mkv",
+            "infoHash": "a" * 40,
+            "fileIndex": 0,
+            "seeders": 5,
+            "size": 120 * 1024 * 1024,
+            "tracker": "Test",
+            "sources": [],
+        }
+        main10 = {
+            **playable,
+            "title": "Law.and.Order.S01E01.2160p.WEB-DL.DV.HDR.H.265.mkv",
+            "infoHash": "b" * 40,
+        }
+
+        await manager.filter_manager("Test", [playable, main10])
+
+        self.assertEqual(
+            {item["infoHash"] for item in manager.ready_to_cache},
+            {playable["infoHash"], main10["infoHash"]},
+        )
+        for item in manager.ready_to_cache:
+            manager._remember_live_torrent(item)
+        self.assertEqual(set(manager.torrents), {playable["infoHash"]})
+
     async def test_scrape_waits_until_cache_updates_are_enqueued(self):
         manager = TorrentManager(
             media_type="movie",

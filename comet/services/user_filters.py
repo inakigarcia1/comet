@@ -15,10 +15,10 @@ from typing import Any
 
 from RTN import ParsedData
 
-from comet.services.playback_capabilities import (
-    playback_capabilities_active,
-    torrent_title_allowed,
-)
+from comet.core.logger import logger
+from comet.services.compatibility import evaluate_title
+from comet.services.playback_capabilities import playback_capabilities_active
+from comet.services.trace import current_trace
 
 _MAX_BYTES = 0
 _GB = 1024**3
@@ -167,19 +167,33 @@ class BitrateFilter:
 
 
 class PlaybackCapabilitiesFilter:
-    """Device playback constraints derived from the addon request."""
+    """Device playback constraints derived from the addon request.
 
-    __slots__ = ("_capabilities",)
+    Only a stream the scorer marks incompatible is removed. The shared Comet
+    cache is written before this filter runs.
+    """
+
+    __slots__ = ("_capabilities", "_rejected")
 
     def __init__(self, capabilities: Mapping[str, Any] | None):
         self._capabilities = capabilities if isinstance(capabilities, Mapping) else None
+        self._rejected = 0
 
     @property
     def is_active(self) -> bool:
         return playback_capabilities_active(self._capabilities)
 
     def matches(self, torrent_title: str) -> bool:
-        return torrent_title_allowed(torrent_title, self._capabilities)
+        result = evaluate_title(torrent_title, self._capabilities)
+        if result is None or not result.incompatible:
+            return True
+        self._rejected += 1
+        if self._rejected <= 20 and isinstance(torrent_title, str):
+            logger.log(
+                "SCRAPER",
+                f"TRACE {current_trace()} reject {result.summary} file={torrent_title[:180]}",
+            )
+        return False
 
 
 class UserFilters:

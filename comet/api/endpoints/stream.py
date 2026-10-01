@@ -10,6 +10,7 @@ from comet.debrid.manager import get_debrid_extension
 from comet.observability import metrics
 from comet.services.cache_admission import CACHE_RESULTS_PER_RESOLUTION, format_counts
 from comet.services.media_search import MediaSearchStatus, search_media
+from comet.services.compatibility import describe_device, evaluate_title
 from comet.services.trace import current_trace, set_trace
 from comet.services.trackers import trackers
 from comet.utils.cache import CachePolicies, cached_json_response
@@ -49,19 +50,24 @@ def _playback_summary(config) -> str:
     playback = config.get("playbackCapabilities") or {}
     if not isinstance(playback, dict) or not playback:
         return "-"
-    parts = []
-    screen = playback.get("screen") or {}
-    if isinstance(screen, dict) and screen.get("width") and screen.get("height"):
-        parts.append(f"{screen.get('width')}x{screen.get('height')}")
-    codecs = playback.get("codecs") or []
-    if isinstance(codecs, list) and codecs:
-        parts.append("codecs=" + "|".join(str(codec) for codec in codecs))
-    if playback.get("decoderCapabilities"):
-        parts.append("decoder=yes")
-    backend = playback.get("playerBackend")
-    if backend:
-        parts.append(f"player={backend}")
-    return " ".join(parts) or "yes"
+    return describe_device(playback)
+
+
+def _attach_playback_score(behavior_hints: dict, torrent_title: str, config) -> None:
+    result = evaluate_title(torrent_title, config.get("playbackCapabilities"))
+    if result is None:
+        return
+    behavior_hints["playbackScore"] = result.score
+    if result.height:
+        behavior_hints["playbackHeight"] = result.height
+    behavior_hints["playbackSummary"] = result.summary
+    logged = int(config.get("_playbackRankLogs") or 0) if isinstance(config, dict) else 0
+    if isinstance(config, dict) and logged < 40:
+        config["_playbackRankLogs"] = logged + 1
+        logger.log(
+            "SCRAPER",
+            f"TRACE {current_trace()} rank {result.summary} file={torrent_title[:180]}",
+        )
 
 
 def _log_search_trace(config, result, duration_minutes) -> None:
@@ -534,6 +540,7 @@ async def stream(
                 "bingeGroup": f"comet|{service}|{info_hash}",
                 "filename": rtn_data.raw_title,
             }
+            _attach_playback_score(behavior_hints, torrent_title, config)
             if torrent_size is not None:
                 behavior_hints["videoSize"] = torrent_size
             if kodi_meta is not None:
@@ -588,6 +595,7 @@ async def stream(
                 "bingeGroup": f"comet|torrent|{info_hash}",
                 "filename": rtn_data.raw_title,
             }
+            _attach_playback_score(behavior_hints, torrent_title, config)
             if torrent_size is not None:
                 behavior_hints["videoSize"] = torrent_size
             if kodi_meta is not None:
