@@ -142,6 +142,12 @@ async def custom_handle_stream_request(
         return build_status_video_response(
             ["PROXY_LIMIT_REACHED"],
             default_key="PROXY_LIMIT_REACHED",
+            detail={
+                "reason": "proxy_connection_limit",
+                "ip": ip,
+                "media_id": media_id,
+                "method": method,
+            },
         )
 
     try:

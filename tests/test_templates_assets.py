@@ -130,6 +130,25 @@ class StatusVideoIndexTests(unittest.TestCase):
                 )
                 self.assertIsNone(status_video.resolve_status_video_path(["UNKNOWN"]))
 
+    def test_status_response_always_serves_the_general_error_video(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            general = root / "Error_General_Apachiy.mp4"
+            general.write_bytes(b"general")
+            (root / "BAD_REQUEST.mp4").write_bytes(b"specific")
+
+            with (
+                patch.object(status_video, "STATUS_VIDEO_DIR", root),
+                patch.object(status_video, "GENERAL_ERROR_VIDEO", general),
+            ):
+                response = status_video.build_status_video_response(
+                    ["BAD_REQUEST"],
+                    default_key="BAD_REQUEST",
+                    detail={"ip": "203.0.113.10", "debrid_service": "realdebrid"},
+                )
+
+            self.assertEqual(Path(response.path), general)
+
     def test_missing_key_never_selects_arbitrary_first_asset(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

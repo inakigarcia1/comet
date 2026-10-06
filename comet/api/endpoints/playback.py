@@ -23,13 +23,22 @@ from comet.debrid.manager import (
     get_debrid_credentials,
 )
 from comet.metadata.manager import MetadataScraper
-from comet.services.status_video import build_status_video_response
+from comet.services.status_video import build_status_video_response, request_context
 from comet.services.streaming.manager import custom_handle_stream_request
 from comet.utils.http_client import http_client_manager
 from comet.utils.network import get_client_ip
 
 router = APIRouter()
 _INFO_HASH_PATTERN = re.compile(r"[0-9a-f]{40}")
+
+
+def _account_context(debrid_service: str, debrid_api_key: str) -> dict:
+    return {
+        "debrid_service": debrid_service,
+        "account_hash": build_account_key_hash(debrid_api_key)[:16],
+    }
+
+
 _NONNEGATIVE_INTEGER_PATTERN = re.compile(r"0|[1-9][0-9]*")
 
 
@@ -250,6 +259,7 @@ async def playback(
         return build_status_video_response(
             ["BAD_REQUEST"],
             default_key="BAD_REQUEST",
+            detail={**request_context(request), "reason": "invalid_config"},
         )
 
     torrent_name = torrent_name.strip()
@@ -259,6 +269,19 @@ async def playback(
         return build_status_video_response(
             ["BAD_REQUEST"],
             default_key="BAD_REQUEST",
+            detail={
+                **request_context(request),
+                "reason": "invalid_playback_query",
+                "info_hash": hash,
+                "service_index": service_index,
+                "file_index": index,
+                "season": season,
+                "episode": episode,
+                "media_id": media_id,
+                "media_type": media_type,
+                "torrent_name_present": bool(torrent_name),
+                "name_present": bool(name),
+            },
         )
 
     try:
@@ -272,10 +295,24 @@ async def playback(
         debrid_service, debrid_api_key = get_debrid_credentials(
             config, parsed_service_index
         )
-    except ValueError:
+    except ValueError as exc:
         return build_status_video_response(
             ["BAD_REQUEST"],
             default_key="BAD_REQUEST",
+            detail={
+                **request_context(request),
+                "reason": "invalid_playback_path",
+                "error": str(exc),
+                "info_hash": hash,
+                "service_index": service_index,
+                "file_index": index,
+                "season": season,
+                "episode": episode,
+                "media_id": media_id,
+                "media_type": media_type,
+                "name": name,
+                "torrent_name": torrent_name,
+            },
         )
     account_key_hash = build_account_key_hash(debrid_api_key)
 
@@ -401,10 +438,24 @@ async def playback(
                     season,
                     episode,
                 )
-            except ValueError:
+            except ValueError as exc:
                 return build_status_video_response(
                     ["BAD_REQUEST"],
                     default_key="BAD_REQUEST",
+                    detail={
+                        **request_context(request),
+                        **_account_context(debrid_service, debrid_api_key),
+                        "reason": "invalid_media_id",
+                        "error": str(exc),
+                        "info_hash": hash,
+                        "file_index": index,
+                        "season": season,
+                        "episode": episode,
+                        "media_id": context_media_id,
+                        "media_type": resolved_media_type,
+                        "name": name,
+                        "torrent_name": torrent_name,
+                    },
                 )
 
             debrid_video_id = full_media_id
@@ -434,33 +485,71 @@ async def playback(
                 expected_size=expected_size,
             )
         except DebridLinkGenerationError as error:
-            logger.log(
-                "PLAYBACK",
-                f"Link generation failed for {hash} index={index!r}: "
-                f"{error.upstream_error_code or error.error_code or type(error).__name__} "
-                f"({error.message})",
-            )
             status_keys = error.status_keys
             return build_status_video_response(
                 status_keys,
                 default_key=status_keys[0] if status_keys else "UNKNOWN",
+                detail={
+                    **request_context(request),
+                    **_account_context(debrid_service, debrid_api_key),
+                    "reason": "link_generation_failed",
+                    "error_type": type(error).__name__,
+                    "message": error.message,
+                    "error_code": error.error_code,
+                    "upstream_error_code": error.upstream_error_code,
+                    "payload": error.payload,
+                    "info_hash": hash,
+                    "file_index": index,
+                    "season": season,
+                    "episode": episode,
+                    "media_id": context_media_id,
+                    "media_type": media_type,
+                    "name": name,
+                    "torrent_name": torrent_name,
+                    "is_manual": is_manual,
+                    "trust_file_index": trust_file_index,
+                    "expected_size": expected_size,
+                },
             )
 
         if not download_url:
-            logger.log(
-                "PLAYBACK",
-                f"Empty download URL for {hash} index={index!r} "
-                f"is_manual={is_manual} trust_file_index={trust_file_index}",
-            )
             return build_status_video_response(
                 [],
                 default_key="UNKNOWN",
+                detail={
+                    **request_context(request),
+                    **_account_context(debrid_service, debrid_api_key),
+                    "reason": "empty_download_url",
+                    "info_hash": hash,
+                    "file_index": index,
+                    "season": season,
+                    "episode": episode,
+                    "media_id": context_media_id,
+                    "media_type": media_type,
+                    "name": name,
+                    "torrent_name": torrent_name,
+                    "is_manual": is_manual,
+                    "trust_file_index": trust_file_index,
+                    "expected_size": expected_size,
+                },
             )
         download_url = _valid_download_url(download_url)
         if download_url is None:
             return build_status_video_response(
                 ["BAD_REQUEST"],
                 default_key="BAD_REQUEST",
+                detail={
+                    **request_context(request),
+                    **_account_context(debrid_service, debrid_api_key),
+                    "reason": "invalid_download_url",
+                    "info_hash": hash,
+                    "file_index": index,
+                    "season": season,
+                    "episode": episode,
+                    "media_id": context_media_id,
+                    "name": name,
+                    "torrent_name": torrent_name,
+                },
             )
 
         await _cache_download_link_safely(

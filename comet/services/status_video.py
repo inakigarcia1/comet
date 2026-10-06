@@ -6,10 +6,14 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 
 from comet.core.logger import logger
 from comet.utils.cache import NO_CACHE_HEADERS
+from comet.utils.network import get_client_ip_any
 from comet.utils.status_keys import normalize_status_key
 
 STATUS_VIDEO_DIR = Path("comet/assets/status_videos")
+GENERAL_ERROR_VIDEO = Path("comet/assets/Error_General_Apachiy.mp4")
 DEFAULT_STATUS_KEY = "UNKNOWN"
+_DETAIL_LIMIT = 4000
+_SECRET_KEYS = {"apikey", "api_key", "authorization", "token", "debridapikey"}
 
 
 def _iter_normalized_keys(status_keys: Iterable[str | None]) -> list[str]:
@@ -70,31 +74,63 @@ def resolve_status_video_path(
     return None
 
 
+def request_context(request) -> dict:
+    ip, from_proxy = get_client_ip_any(request)
+    return {
+        "ip": ip,
+        "ip_from_proxy": from_proxy,
+        "user_agent": request.headers.get("user-agent", ""),
+    }
+
+
+def _clip(value) -> str:
+    text = value if isinstance(value, str) else repr(value)
+    if len(text) <= _DETAIL_LIMIT:
+        return text
+    return text[:_DETAIL_LIMIT] + "...(truncated)"
+
+
+def _log_replaced_status_video(
+    code: str,
+    status_keys: list[str],
+    default_key: str,
+    detail: dict,
+) -> None:
+    lines = [
+        "Comet reemplazó un video de estado por Error_General_Apachiy.mp4.",
+        f"  code={code}",
+        f"  keys={status_keys or [default_key]}",
+        f"  default={default_key}",
+    ]
+    for key, value in detail.items():
+        if value is None or value == "":
+            continue
+        if key.lower() in _SECRET_KEYS:
+            value = "***"
+        lines.append(f"  {key}={_clip(value)}")
+    logger.error("\n".join(lines))
+
+
 def build_status_video_response(
     status_keys: Iterable[str | None],
     default_key: str = DEFAULT_STATUS_KEY,
+    *,
+    detail: dict | None = None,
 ) -> Response:
-    status_keys_tuple = tuple(status_keys)
-    video_path = resolve_status_video_path(status_keys_tuple, default_key)
+    normalized_keys = _iter_normalized_keys(status_keys)
+    normalized_default = normalize_status_key(default_key) or DEFAULT_STATUS_KEY
+    code = normalized_keys[0] if normalized_keys else normalized_default
+    _log_replaced_status_video(code, normalized_keys, normalized_default, detail or {})
 
-    if video_path is None:
-        normalized_default_key = normalize_status_key(default_key) or DEFAULT_STATUS_KEY
-        normalized_status_keys = _iter_normalized_keys(status_keys_tuple)
-        logger.error(
-            f"Missing status video in {STATUS_VIDEO_DIR} for keys={normalized_status_keys} "
-            f"and default={normalized_default_key}"
-        )
+    if not GENERAL_ERROR_VIDEO.is_file():
+        logger.error(f"Missing general error video at {GENERAL_ERROR_VIDEO}")
         return JSONResponse(
             status_code=500,
-            content={
-                "detail": "Status video asset is missing on server.",
-                "status_keys": normalized_status_keys,
-                "default_key": normalized_default_key,
-            },
+            content={"detail": "General error video is missing on server.", "code": code},
             headers=NO_CACHE_HEADERS,
         )
 
     return FileResponse(
-        video_path,
+        GENERAL_ERROR_VIDEO,
         headers=NO_CACHE_HEADERS,
     )
