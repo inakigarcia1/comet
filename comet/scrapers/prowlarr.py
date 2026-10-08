@@ -16,6 +16,7 @@ from comet.services.torrent_manager import (
     extract_torrent_metadata,
     extract_trackers_from_magnet,
 )
+from comet.utils.parsing import video_file_entries
 
 
 class ProwlarrScraper(BaseScraper):
@@ -45,7 +46,10 @@ class ProwlarrScraper(BaseScraper):
             if content:
                 metadata = await asyncio.to_thread(extract_torrent_metadata, content)
                 if metadata:
-                    for file in metadata["files"]:
+                    video_files = video_file_entries(metadata["files"])
+                    if not video_files:
+                        return []
+                    for file in video_files:
                         torrent = base_torrent.copy()
                         torrent["title"] = file["title"]
                         torrent["infoHash"] = metadata["info_hash"].lower()

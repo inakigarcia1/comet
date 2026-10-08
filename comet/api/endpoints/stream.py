@@ -20,7 +20,7 @@ from comet.utils.formatting import (
     get_formatted_components,
     get_formatted_components_plain,
 )
-from comet.utils.network import get_client_ip
+from comet.utils.parsing import is_non_video_file
 
 streams = APIRouter()
 STREMIO_API_PREFIX = settings.STREMIO_API_PREFIX
@@ -545,6 +545,8 @@ async def stream(
 
     def _append_ranked_hash(info_hash):
         torrent = torrents[info_hash]
+        if is_non_video_file(torrent.get("title") or ""):
+            return
         rtn_data = torrent["parsed"]
         torrent_title = torrent["title"]
         torrent_size = torrent["size"]

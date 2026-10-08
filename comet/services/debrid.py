@@ -10,7 +10,12 @@ from comet.services.debrid_cache import (
     get_cached_availability_any_service,
     schedule_cache_availability,
 )
-from comet.utils.parsing import MediaScope, ensure_multi_language, load_cached_parsed
+from comet.utils.parsing import (
+    MediaScope,
+    ensure_multi_language,
+    is_non_video_file,
+    load_cached_parsed,
+)
 
 
 class DebridService:
@@ -121,8 +126,9 @@ class DebridService:
     ) -> tuple[set[str], dict[str, dict]]:
         started_at = time.perf_counter() if metrics.enabled else 0.0
         outcome = "success"
+        availability, archive_only = [], set()
         try:
-            availability = await retrieve_debrid_availability(
+            availability, archive_only = await retrieve_debrid_availability(
                 session,
                 media_id,
                 media_only_id,
@@ -151,13 +157,18 @@ class DebridService:
                     len(availability) if "availability" in locals() else 0,
                 )
 
-        if len(availability) == 0:
-            return set(), {}
+        if not availability and not archive_only:
+            return set(), {}, set()
 
         info_hash_set = set(info_hashes)
         cached_hashes = set()
         torrent_updates = {}
         for file in availability:
+            if not isinstance(file, dict):
+                continue
+            title = file.get("title") or ""
+            if is_non_video_file(title):
+                continue
             if not media_scope.matches_file(
                 season,
                 episode,
@@ -186,7 +197,12 @@ class DebridService:
                     torrent_updates.setdefault(info_hash, {}).update(update)
 
         schedule_cache_availability(self.debrid_service, availability)
-        return cached_hashes, torrent_updates
+        for info_hash in archive_only:
+            torrent = torrents.get(info_hash) if torrents is not None else None
+            if torrent is not None:
+                torrent.pop("fileIndex", None)
+            cached_hashes.discard(info_hash)
+        return cached_hashes, torrent_updates, set(archive_only)
 
     async def check_existing_availability(
         self,
@@ -231,6 +247,9 @@ class DebridService:
         torrent_updates = {}
         for row in rows:
             info_hash = row["info_hash"]
+            title = row["title"] or ""
+            if is_non_video_file(title):
+                continue
             cached_hashes.add(info_hash)
             if torrents is not None and not media_scope.is_aggregate:
                 torrent = torrents.get(info_hash)

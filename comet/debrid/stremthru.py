@@ -16,6 +16,7 @@ from comet.services.filtering import exact_alias_match
 from comet.services.torrent_manager import torrent_update_queue
 from comet.utils.parsing import (
     ensure_multi_language,
+    is_non_video_file,
     is_video,
     match_parsed_episode_target,
     parse_media_id,
@@ -508,7 +509,12 @@ class StremThru:
             "SCRAPER",
             f"{self.store_name}: Found {len(cached_torrents)} cached torrents with {len(files)} valid files",
         )
-        return files
+        archive_only = {
+            torrent["info_hash"]
+            for torrent in cached_torrents
+            if not torrent["files"]
+        }
+        return files, archive_only
 
     async def generate_download_link(
         self,
@@ -600,7 +606,9 @@ class StremThru:
                     episode=episode,
                     expected_size=expected_size,
                 )
-                if target_file is None:
+                if target_file is None or is_non_video_file(
+                    _store_file_basename(target_file)
+                ):
                     available_names = [
                         _store_file_basename(file) for file in debrid_files
                         if isinstance(file, dict)

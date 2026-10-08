@@ -172,6 +172,57 @@ def is_video(title: str):
     return title.lower().endswith(video_extensions)
 
 
+_NON_VIDEO_SUFFIXES = (
+    ".zip",
+    ".rar",
+    ".7z",
+    ".tar",
+    ".gz",
+    ".bz2",
+    ".xz",
+    ".iso",
+    ".nfo",
+    ".txt",
+    ".srt",
+    ".ass",
+    ".ssa",
+    ".sub",
+    ".idx",
+    ".vtt",
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".webp",
+    ".exe",
+    ".pdf",
+    ".torrent",
+    ".sfv",
+    ".par2",
+)
+
+
+def is_non_video_file(title: str) -> bool:
+    """True only when the name has a known non-video suffix.
+
+    Release titles without an extension stay playable. ``.mkv`` does too.
+    """
+    if not isinstance(title, str) or not title.strip():
+        return False
+    name = title.replace("\\", "/").rsplit("/", 1)[-1].strip().lower()
+    return name.endswith(_NON_VIDEO_SUFFIXES)
+
+
+def video_file_entries(files) -> list:
+    kept = []
+    for file in files:
+        if not isinstance(file, dict):
+            continue
+        title = file.get("title")
+        if is_video(str(title or "")):
+            kept.append(file)
+    return kept
+
+
 def default_dump(obj):
     if isinstance(obj, ParsedData):
         return obj.model_dump()

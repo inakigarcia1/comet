@@ -284,7 +284,7 @@ async def get_and_cache_multi_service_availability(
             if not known_cache_status.get(info_hash, {}).get(service, False)
         ]
         if not service_info_hashes:
-            return service, set(), {}, None
+            return service, set(), {}, None, set()
 
         auth_error = None
         for entry in entries:
@@ -293,6 +293,7 @@ async def get_and_cache_multi_service_availability(
                 (
                     cached_hashes,
                     torrent_updates,
+                    archive_only,
                 ) = await debrid_instance.get_and_cache_availability(
                     session,
                     service_info_hashes,
@@ -307,14 +308,14 @@ async def get_and_cache_multi_service_availability(
                     media_scope,
                     target_air_date=target_air_date,
                 )
-                return service, cached_hashes, torrent_updates, None
+                return service, cached_hashes, torrent_updates, None, archive_only
             except DebridAuthError as error:
                 if auth_error is None:
                     auth_error = error
             except Exception as error:
-                return service, None, None, error
+                return service, None, None, error, set()
 
-        return service, None, None, auth_error
+        return service, None, None, auth_error, set()
 
     results = await asyncio.gather(
         *(check_service(service, entries) for service, entries in service_groups),
@@ -322,12 +323,13 @@ async def get_and_cache_multi_service_availability(
     )
 
     enriched_hashes = set()
+    archive_only_hashes = set()
     for result in results:
         if isinstance(result, Exception):
             logger.log("DEBRID", f"❌ Error checking availability: {result}")
             continue
 
-        service, cache_map, torrent_updates, error = result
+        service, cache_map, torrent_updates, error, archive_only = result
         if error:
             if isinstance(error, DebridAuthError):
                 errors[service] = error
@@ -349,8 +351,9 @@ async def get_and_cache_multi_service_availability(
         if cache_map:
             for info_hash in cache_map:
                 service_cache_status[info_hash][service] = True
+        archive_only_hashes.update(archive_only or ())
 
-    return service_cache_status, errors
+    return service_cache_status, errors, archive_only_hashes
 
 
 async def search_media(
@@ -776,6 +779,7 @@ async def search_media(
         (
             fresh_service_cache_status,
             debrid_errors,
+            archive_only,
         ) = await get_and_cache_multi_service_availability(
             session,
             debrid_entries,
@@ -790,6 +794,12 @@ async def search_media(
             known_cache_status=service_cache_status,
         )
         merge_service_cache_status(service_cache_status, fresh_service_cache_status)
+        for info_hash in archive_only:
+            for service in dict.fromkeys(entry["service"] for entry in debrid_entries):
+                service_cache_status[info_hash][service] = False
+            torrent = torrent_manager.torrents.get(info_hash)
+            if torrent is not None:
+                torrent.pop("fileIndex", None)
 
     for service in dict.fromkeys(entry["service"] for entry in debrid_entries):
         cached_count = sum(
