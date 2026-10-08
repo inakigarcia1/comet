@@ -38,6 +38,48 @@ RESOLUTION_TO_DIMENSIONS = {
 }
 
 
+def _is_480p(parsed) -> bool:
+    return str(getattr(parsed, "resolution", "") or "").strip().lower() in {
+        "480p",
+        "r480p",
+    }
+
+
+def _client_disabled_480p(config) -> bool:
+    resolutions = config.get("resolutions") if isinstance(config, dict) else None
+    return isinstance(resolutions, dict) and resolutions.get("r480p") is False
+
+
+def _has_playable_stream(streams) -> bool:
+    for stream in streams:
+        hints = stream.get("behaviorHints") or {}
+        if hints.get("bingeGroup") or stream.get("infoHash"):
+            return True
+    return False
+
+
+def _sd480_fallback_hashes(torrents: dict, already, limit: int) -> list[str]:
+    skipped = set(already)
+    candidates = []
+    for info_hash, torrent in torrents.items():
+        if info_hash in skipped or not isinstance(torrent, dict):
+            continue
+        parsed = torrent.get("parsed")
+        if parsed is None or not _is_480p(parsed):
+            continue
+        candidates.append(info_hash)
+    candidates.sort(
+        key=lambda info_hash: (
+            -(torrents[info_hash].get("seeders") or 0),
+            -(torrents[info_hash].get("size") or 0),
+            info_hash,
+        )
+    )
+    if limit > 0:
+        return candidates[:limit]
+    return candidates
+
+
 def _disabled_resolutions(config) -> str:
     resolutions = config.get("resolutions") or {}
     if not isinstance(resolutions, dict):
@@ -501,7 +543,7 @@ async def stream(
 
     added_hashes = set()
 
-    for info_hash in ranked_info_hashes:
+    def _append_ranked_hash(info_hash):
         torrent = torrents[info_hash]
         rtn_data = torrent["parsed"]
         torrent_title = torrent["title"]
@@ -589,7 +631,7 @@ async def stream(
 
         if enable_torrent:
             if deduplicate_streams and info_hash in added_hashes:
-                continue
+                return
 
             behavior_hints = {
                 "bingeGroup": f"comet|torrent|{info_hash}",
@@ -630,13 +672,35 @@ async def stream(
 
             cached_results.append(the_stream)
 
+    emitted = list(ranked_info_hashes)
+    for info_hash in emitted:
+        _append_ranked_hash(info_hash)
+
+    if (
+        _client_disabled_480p(config)
+        and not _has_playable_stream(cached_results + non_cached_results)
+    ):
+        fallback = _sd480_fallback_hashes(
+            torrents,
+            emitted,
+            config["maxResultsPerResolution"],
+        )
+        if fallback:
+            logger.log(
+                "SCRAPER",
+                f"TRACE {current_trace()} 480p fallback count={len(fallback)}",
+            )
+            emitted.extend(fallback)
+            for info_hash in fallback:
+                _append_ranked_hash(info_hash)
+
     if sort_mixed:
         final_streams = cached_results
     else:
         final_streams = cached_results + non_cached_results
 
     returned_counts = {}
-    for info_hash in ranked_info_hashes:
+    for info_hash in emitted:
         parsed = torrents[info_hash]["parsed"]
         key = str(getattr(parsed, "resolution", None) or "unknown") or "unknown"
         returned_counts[key] = returned_counts.get(key, 0) + 1
