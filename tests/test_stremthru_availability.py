@@ -358,6 +358,70 @@ class TrustedFilenameMatchTests(unittest.TestCase):
         )
         self.assertEqual(_season_episode_from_filename("Movie.2024.1080p.mkv"), None)
 
+    def test_parses_three_digit_episode_tokens(self):
+        self.assertEqual(
+            _season_episode_from_filename("T1-001. Hogar dulce hogar [480p].ia.mp4"),
+            (1, 1),
+        )
+        self.assertEqual(
+            _season_episode_from_filename("T1-003. Un tiro al aire [480p].ia.mp4"),
+            (1, 3),
+        )
+        self.assertEqual(
+            _season_episode_from_filename("T1-137. El gran final [480p].ia.mp4"),
+            (1, 137),
+        )
+        self.assertEqual(
+            _season_episode_from_filename("T2-75. El final [480p].ia.mp4"),
+            (2, 75),
+        )
+        self.assertEqual(
+            _season_episode_from_filename("Show.Name.S01E137.480p.mkv"),
+            (1, 137),
+        )
+        self.assertEqual(
+            _season_episode_from_filename("Show.Name.S01E100.1080p.mkv"),
+            (1, 100),
+        )
+
+    def test_nxnn_pattern_unchanged_for_codec_like_tokens(self):
+        self.assertEqual(_season_episode_from_filename("release.2x264.aac.mkv"), None)
+        self.assertEqual(_season_episode_from_filename("Show.1x02.720p.mkv"), (1, 2))
+
+    def test_pick_three_digit_episodes_in_shared_pack(self):
+        files = [
+            {
+                "name": "T1-003. Un tiro al aire [480p].ia.mp4",
+                "index": 0,
+                "size": 100,
+                "link": "e3",
+            },
+            {
+                "name": "T1-013. Mar de las Pompas fúnebres (Parte 1) [480p].ia.mp4",
+                "index": 1,
+                "size": 200,
+                "link": "e13",
+            },
+            {
+                "name": "T1-137. El gran final [480p].ia.mp4",
+                "index": 2,
+                "size": 300,
+                "link": "e137",
+            },
+        ]
+        self.assertEqual(
+            _pick_file_by_trusted_index(files, "n", season=1, episode=3)["link"],
+            "e3",
+        )
+        self.assertEqual(
+            _pick_file_by_trusted_index(files, "n", season=1, episode=13)["link"],
+            "e13",
+        )
+        self.assertEqual(
+            _pick_file_by_trusted_index(files, "n", season=1, episode=137)["link"],
+            "e137",
+        )
+
     def test_does_not_use_torbox_file_id_as_torrent_index(self):
         files = [
             {

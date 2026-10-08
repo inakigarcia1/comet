@@ -77,8 +77,8 @@ def _prepare_cached_torrents(responses, *, is_offcloud: bool):
     return prepared, filenames
 
 
-_SXXEYY = re.compile(r"(?i)s(\d{1,2})e(\d{1,2})")
-_TXNN = re.compile(r"(?i)(?:^|[^a-z0-9])t(\d{1,2})[-_. ]e?(\d{1,2})(?:[^0-9]|$)")
+_SXXEYY = re.compile(r"(?i)s(\d{1,2})e(\d{1,3})(?!\d)")
+_TXNN = re.compile(r"(?i)(?:^|[^a-z0-9])t(\d{1,2})[-_. ]e?(\d{1,3})(?:[^0-9]|$)")
 _NXNN = re.compile(r"(?i)(?:^|[^a-z0-9])(\d{1,2})x(\d{1,2})(?:[^0-9]|$)")
 
 
