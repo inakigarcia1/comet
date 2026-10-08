@@ -506,11 +506,10 @@ async def search_media(
 
     absolute_episode = None
     absolute_index = {}
-    if (
-        is_imdb_episode_request
-        and anime_mapper.is_loaded()
-        and anime_mapper.is_anime_content(media_id, media_only_id)
-    ):
+    is_anime = anime_mapper.is_loaded() and anime_mapper.is_anime_content(
+        media_id, media_only_id
+    )
+    if is_imdb_episode_request and is_anime:
         absolute_episode, absolute_index = await EpisodeIndexService(
             session
         ).get_absolute_episode_index(media_only_id, search_season, search_episode)
@@ -808,8 +807,13 @@ async def search_media(
     from comet.services.user_filters import compute_effective_max_size
 
     effective_max_size = compute_effective_max_size(config, media_type)
+    from comet.services.ranking import allow_unknown_resolution
+
+    rtn_settings = config["rtnSettings"]
+    if is_anime:
+        rtn_settings = allow_unknown_resolution(rtn_settings)
     await torrent_manager.rank_torrents(
-        config["rtnSettings"],
+        rtn_settings,
         config["rtnRanking"],
         0,
         effective_max_size,
