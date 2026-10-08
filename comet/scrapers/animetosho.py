@@ -137,7 +137,7 @@ class AnimeToshoScraper(BaseScraper):
                 f"AnimeTosho query {query!r}",
                 self._scrape_query(query, semaphore),
             )
-            for query in request.query_titles
+            for query in request.title_queries()
         )
         return deduplicate_torrents(
             [torrent for torrents in results for torrent in torrents]

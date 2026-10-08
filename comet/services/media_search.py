@@ -504,6 +504,23 @@ async def search_media(
                 f"S{search_season:02d}E{search_episode:02d}",
             )
 
+    absolute_episode = None
+    absolute_index = {}
+    if (
+        is_imdb_episode_request
+        and anime_mapper.is_loaded()
+        and anime_mapper.is_anime_content(media_id, media_only_id)
+    ):
+        absolute_episode, absolute_index = await EpisodeIndexService(
+            session
+        ).get_absolute_episode_index(media_only_id, search_season, search_episode)
+        if absolute_episode is not None and absolute_episode != search_episode:
+            logger.log(
+                "SCRAPER",
+                f"🎌 Absolute episode {absolute_episode} for "
+                f"{media_only_id} S{search_season:02d}E{search_episode:02d}",
+            )
+
     remove_adult_content = settings.REMOVE_ADULT_CONTENT and config["removeTrash"]
     from comet.services.user_filters import build_user_filters, has_include_but_no_match
 
@@ -528,6 +545,8 @@ async def search_media(
         reject_unknown_episode_files=reject_unknown_episode_files,
         media_scope=media_scope,
         user_filters=user_filters,
+        absolute_episode=absolute_episode,
+        absolute_index=absolute_index,
     )
 
     await torrent_manager.get_cached_torrents()
@@ -553,6 +572,17 @@ async def search_media(
         logger.log(
             "FILTER",
             "🔁 filenameInclude has no match in cache; triggering one live refresh",
+        )
+        torrent_manager._force_filename_refresh = True
+
+    if (
+        torrent_manager.absolute_episode is not None
+        and unfiltered_count
+        and torrent_count == 0
+    ):
+        logger.log(
+            "SCRAPER",
+            "🔁 Anime absolute match missed the cached rows; triggering one live refresh",
         )
         torrent_manager._force_filename_refresh = True
 
@@ -661,6 +691,7 @@ async def search_media(
             target_air_date=target_air_date,
             reject_unknown_episode_files=reject_unknown_episode_files,
             origin=metadata.get("origin"),
+            absolute_episode=absolute_episode,
         )
 
         for info_hash, account_torrent in account_torrents.items():

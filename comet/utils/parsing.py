@@ -46,6 +46,7 @@ class MediaScope(StrEnum):
         target_air_date: str | None = None,
         reject_unknown_episode_files: bool = False,
         scope_is_known: bool = False,
+        absolute_episode: int | None = None,
     ) -> bool:
         if self is MediaScope.SERIES:
             return True
@@ -61,6 +62,7 @@ class MediaScope(StrEnum):
             episode,
             target_air_date=target_air_date,
             reject_unknown_episode_files=reject_unknown_episode_files,
+            absolute_episode=absolute_episode,
         )
 
     def granularity_priority(self, parsed: ParsedData) -> int:
@@ -225,14 +227,44 @@ def parse_media_id(media_type: str, media_id: str):
     return parts[0], None, None
 
 
+# ponytail: a two-number span wider than this is a whole-show pack, not one cour
+ABSOLUTE_RANGE_LIMIT = 80
+
+
+def absolute_episode_in_parsed(episodes, absolute: int) -> bool:
+    if not episodes:
+        return False
+    if absolute in episodes:
+        return True
+    if len(episodes) != 2:
+        return False
+    low, high = min(episodes), max(episodes)
+    return low < high and high - low <= ABSOLUTE_RANGE_LIMIT and low <= absolute <= high
+
+
 def match_parsed_episode_target(
     parsed: ParsedData,
     season: int | None,
     episode: int | None,
     target_air_date: str | None = None,
     reject_unknown_episode_files: bool = False,
+    absolute_episode: int | None = None,
 ) -> bool:
     parsed_seasons = parsed.seasons
+    if (
+        episode is not None
+        and absolute_episode is not None
+        and not parsed_seasons
+        and absolute_episode_in_parsed(parsed.episodes, absolute_episode)
+    ):
+        return True
+    if (
+        episode is not None
+        and absolute_episode is not None
+        and not parsed_seasons
+        and parsed.episodes
+    ):
+        return False
 
     if episode is None:
         parsed_episodes = parsed.episodes
@@ -275,6 +307,7 @@ def parsed_matches_target(
     episode: int | None,
     target_air_date: str | None = None,
     reject_unknown_episode_files: bool = False,
+    absolute_episode: int | None = None,
 ) -> bool:
     return match_parsed_episode_target(
         parsed,
@@ -282,6 +315,7 @@ def parsed_matches_target(
         episode,
         target_air_date=target_air_date,
         reject_unknown_episode_files=reject_unknown_episode_files,
+        absolute_episode=absolute_episode,
     )
 
 

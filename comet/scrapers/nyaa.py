@@ -137,7 +137,7 @@ class NyaaScraper(BaseScraper):
                 f"Nyaa query {query!r} ({NYAA_BASE_URL})",
                 get_all_nyaa_pages(self.session, query, semaphore),
             )
-            for query in request.query_titles
+            for query in request.title_queries()
         )
         for result in results:
             torrents.extend(result)

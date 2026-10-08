@@ -208,3 +208,53 @@ class IndexerTitleTests(unittest.TestCase):
                 "Localized S02",
             ),
         )
+
+    def test_absolute_episode_queries_are_added_without_dropping_season_codes(self):
+        request = ScrapeRequest(
+            media_type="series",
+            media_id="tt0988824:2:1",
+            media_only_id="tt0988824",
+            title="Naruto: Shippuden",
+            season=2,
+            episode=1,
+            absolute_episode=33,
+        )
+
+        self.assertEqual(
+            request.title_queries(include_episode_variants=True),
+            (
+                "Naruto: Shippuden",
+                "Naruto: Shippuden S02",
+                "Naruto: Shippuden S02E01",
+                "Naruto: Shippuden 33",
+                "Naruto: Shippuden 033",
+            ),
+        )
+        self.assertEqual(
+            request.title_queries(),
+            (
+                "Naruto: Shippuden",
+                "Naruto: Shippuden 33",
+                "Naruto: Shippuden 033",
+            ),
+        )
+
+    def test_absolute_episode_query_is_skipped_when_it_matches_the_season_episode(self):
+        request = ScrapeRequest(
+            media_type="series",
+            media_id="tt0988824:1:1",
+            media_only_id="tt0988824",
+            title="Naruto: Shippuden",
+            season=1,
+            episode=1,
+            absolute_episode=1,
+        )
+
+        self.assertEqual(
+            request.title_queries(include_episode_variants=True),
+            (
+                "Naruto: Shippuden",
+                "Naruto: Shippuden S01",
+                "Naruto: Shippuden S01E01",
+            ),
+        )

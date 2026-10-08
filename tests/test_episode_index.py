@@ -2,7 +2,11 @@ import unittest
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, patch
 
-from comet.metadata.episode_index import EpisodeIndexService, database
+from comet.metadata.episode_index import (
+    EpisodeIndexService,
+    absolute_index_from_rows,
+    database,
+)
 
 
 class EpisodeIndexRefreshTests(unittest.IsolatedAsyncioTestCase):
@@ -97,4 +101,26 @@ class EpisodeIndexRefreshTests(unittest.IsolatedAsyncioTestCase):
                 ("marker", "tt123", 42.0),
                 "rollback",
             ],
+        )
+
+
+class AbsoluteEpisodeIndexTests(unittest.TestCase):
+    def test_counts_broadcast_order_and_skips_specials(self):
+        rows = [{"season": 0, "episode": 1}]
+        rows += [{"season": 1, "episode": episode} for episode in range(1, 33)]
+        rows += [{"season": 2, "episode": episode} for episode in range(1, 22)]
+
+        absolute, mapping = absolute_index_from_rows(rows, 2, 1)
+
+        self.assertEqual(absolute, 33)
+        self.assertEqual(mapping[33], (2, 1))
+        self.assertEqual(mapping[1], (1, 1))
+        self.assertNotIn(0, {season for season, _episode in mapping.values()})
+
+    def test_requires_the_requested_row_and_season_one(self):
+        rows = [{"season": 2, "episode": 1}]
+        self.assertEqual(absolute_index_from_rows(rows, 2, 1), (None, {}))
+        self.assertEqual(
+            absolute_index_from_rows([{"season": 1, "episode": 1}], 1, 2),
+            (None, {}),
         )

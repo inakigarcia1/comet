@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 from comet.utils.parsing import (
     MediaScope,
+    match_parsed_episode_target,
     parse_media_id,
     parse_optional_int,
     resolve_media_scope,
@@ -53,6 +54,24 @@ class MediaIdContractTests(unittest.TestCase):
             with self.subTest(media_type=media_type, media_id=media_id):
                 with self.assertRaises(ValueError):
                     parse_media_id(media_type, media_id)
+
+    def test_absolute_episode_matches_only_when_anime_number_is_known(self):
+        seasonal = SimpleNamespace(seasons=[2], episodes=[1])
+        absolute_file = SimpleNamespace(seasons=[], episodes=[33])
+        first_episode = SimpleNamespace(seasons=[], episodes=[1])
+        cour = SimpleNamespace(seasons=[], episodes=[33, 53])
+
+        self.assertTrue(
+            match_parsed_episode_target(seasonal, 2, 1, absolute_episode=33)
+        )
+        self.assertTrue(
+            match_parsed_episode_target(absolute_file, 2, 1, absolute_episode=33)
+        )
+        self.assertTrue(match_parsed_episode_target(cour, 2, 1, absolute_episode=40))
+        self.assertFalse(
+            match_parsed_episode_target(first_episode, 2, 1, absolute_episode=33)
+        )
+        self.assertTrue(match_parsed_episode_target(first_episode, 2, 1))
 
     def test_media_scope_resolution_is_unambiguous(self):
         self.assertIs(resolve_media_scope("movie", None, None), MediaScope.MOVIE)

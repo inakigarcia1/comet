@@ -10,6 +10,7 @@ from comet.core.logger import logger
 from comet.core.models import settings
 from comet.debrid.exceptions import DebridAuthError, DebridLinkGenerationError
 from comet.metadata.episode_index import EpisodeIndexService
+from comet.services.anime import anime_mapper
 from comet.services.debrid_cache import schedule_cache_availability
 from comet.services.filtering import exact_alias_match
 from comet.services.torrent_manager import torrent_update_queue
@@ -233,6 +234,7 @@ class StremThru:
         season: int,
         episode: int,
         target_air_date: str | None,
+        absolute_episode: int | None = None,
     ) -> bool:
         return match_parsed_episode_target(
             parsed,
@@ -240,6 +242,7 @@ class StremThru:
             episode,
             target_air_date=target_air_date,
             reject_unknown_episode_files=True,
+            absolute_episode=absolute_episode,
         )
 
     async def _episode_request_context(
@@ -248,7 +251,7 @@ class StremThru:
         season: int | None,
         episode: int | None,
         target_air_date: str | None = None,
-    ) -> tuple[bool, int | None, int | None, str | None]:
+    ) -> tuple[bool, int | None, int | None, str | None, int | None]:
         is_episode_request = (
             isinstance(series_id, str)
             and series_id.startswith("tt")
@@ -256,13 +259,21 @@ class StremThru:
             and episode is not None
         )
         if not is_episode_request:
-            return False, season, episode, None
+            return False, season, episode, None, None
 
+        index = EpisodeIndexService(self.session)
         if target_air_date is None:
-            target_air_date = await EpisodeIndexService(
-                self.session
-            ).get_target_air_date(series_id, season, episode)
-        return True, season, episode, target_air_date
+            target_air_date = await index.get_target_air_date(
+                series_id, season, episode
+            )
+        absolute_episode = None
+        if anime_mapper.is_loaded() and anime_mapper.is_anime_content(
+            series_id, series_id
+        ):
+            absolute_episode, _mapping = await index.get_absolute_episode_index(
+                series_id, season, episode
+            )
+        return True, season, episode, target_air_date, absolute_episode
 
     async def _post_store_json(self, endpoint: str, payload: dict, action: str) -> dict:
         async with self.session.post(
@@ -402,6 +413,7 @@ class StremThru:
             requested_season,
             requested_episode,
             target_air_date,
+            absolute_episode,
         ) = await self._episode_request_context(
             requested_series_id,
             requested_season,
@@ -458,6 +470,7 @@ class StremThru:
                         requested_season,
                         requested_episode,
                         target_air_date,
+                        absolute_episode,
                     ):
                         continue
                     season = requested_season
@@ -697,6 +710,7 @@ class StremThru:
                 season,
                 episode,
                 target_air_date,
+                absolute_episode,
             ) = await self._episode_request_context(self.media_only_id, season, episode)
 
             for file, filename, parsed in zip(
@@ -718,6 +732,7 @@ class StremThru:
                         season,
                         episode,
                         target_air_date,
+                        absolute_episode,
                     ):
                         continue
                     file_season = season

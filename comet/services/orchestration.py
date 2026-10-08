@@ -22,6 +22,7 @@ from comet.services.torrent_manager import torrent_update_queue
 from comet.utils.languages import select_indexer_titles
 from comet.utils.media_ids import normalize_cache_media_ids
 from comet.utils.parsing import (
+    ABSOLUTE_RANGE_LIMIT,
     MediaScope,
     ensure_multi_language,
     load_cached_parsed,
@@ -85,6 +86,8 @@ class TorrentManager:
         media_scope: MediaScope | None = None,
         user_filters=None,
         origin: str | None = None,
+        absolute_episode: int | None = None,
+        absolute_index: dict | None = None,
     ):
         self.media_type = media_type
         self.media_id = media_full_id
@@ -112,6 +115,8 @@ class TorrentManager:
         self.reject_unknown_episode_files = reject_unknown_episode_files
         self.user_filters = user_filters
         self.origin = origin
+        self.absolute_episode = absolute_episode
+        self.absolute_index = absolute_index or {}
 
         self.seen_hashes = set()
         self.torrents = {}
@@ -141,6 +146,7 @@ class TorrentManager:
             target_air_date=self.target_air_date,
             reject_unknown_episode_files=reject_unknown,
             scope_is_known=scope_is_known,
+            absolute_episode=self.absolute_episode,
         )
 
     async def scrape_torrents(
@@ -156,6 +162,7 @@ class TorrentManager:
             year_end=self.year_end,
             season=self.search_season,
             episode=self.search_episode,
+            absolute_episode=self.absolute_episode,
             context=context,
             search_titles=select_indexer_titles(
                 self.title,
@@ -365,8 +372,36 @@ class TorrentManager:
                     continue
             self.torrents[info_hash] = torrent_entry
 
+    def _absolute_cache_targets(self, parsed: ParsedData) -> list[tuple[int, int]] | None:
+        if self.absolute_episode is None or parsed.seasons or not parsed.episodes:
+            return None
+        numbers = [int(number) for number in parsed.episodes]
+        if len(numbers) == 2 and numbers[1] != numbers[0]:
+            low, high = min(numbers), max(numbers)
+            if high - low <= ABSOLUTE_RANGE_LIMIT:
+                numbers = list(range(low, high + 1))
+            elif low <= self.absolute_episode <= high:
+                numbers = [self.absolute_episode]
+            else:
+                numbers = []
+        targets = []
+        seen = set()
+        for number in numbers:
+            mapped = self.absolute_index.get(number)
+            if mapped is None or mapped in seen:
+                continue
+            seen.add(mapped)
+            targets.append(mapped)
+        return targets
+
     def _append_cache_file_infos(self, file_infos: list[dict], torrent: dict):
         parsed = torrent["parsed"]
+        absolute_targets = self._absolute_cache_targets(parsed)
+        if absolute_targets is not None:
+            if not absolute_targets:
+                return
+            self._append_cached_pairs(file_infos, torrent, absolute_targets)
+            return
         cache_seasons = parsed.seasons or [
             self.search_season if self.search_season is not None else self.season
         ]
@@ -380,6 +415,14 @@ class TorrentManager:
             parsed_episodes = [self.search_episode]
 
         episode = None if len(parsed_episodes) > 1 else parsed_episodes[0]
+        self._append_cached_pairs(
+            file_infos,
+            torrent,
+            [(season, episode) for season in cache_seasons],
+        )
+
+    def _append_cached_pairs(self, file_infos: list[dict], torrent: dict, pairs):
+        parsed = torrent["parsed"]
         info_hash = torrent["infoHash"]
         file_index = torrent["fileIndex"]
         title = torrent["title"]
@@ -387,8 +430,7 @@ class TorrentManager:
         seeders = torrent["seeders"]
         tracker = torrent["tracker"]
         sources = torrent["sources"]
-
-        for season in cache_seasons:
+        for season, episode in pairs:
             file_infos.append(
                 {
                     "info_hash": info_hash,

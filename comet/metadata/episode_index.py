@@ -79,6 +79,38 @@ _DELETE_SERIES_EPISODE_INDEX_QUERY = """
     WHERE series_id = :series_id
 """
 
+_SERIES_NUMBERED_EPISODES_QUERY = """
+    SELECT season, episode
+    FROM series_episode_index
+    WHERE series_id = :series_id
+      AND season > 0
+    ORDER BY season, episode
+"""
+
+def absolute_index_from_rows(rows, season: int, episode: int):
+    """Map broadcast order to absolute episode numbers.
+
+    Returns (absolute, {absolute: (season, episode)}). None when the requested
+    episode is missing, or a later season has no season 1 to count from.
+    """
+    ordered = []
+    seen = set()
+    for row in rows:
+        key = (int(row["season"]), int(row["episode"]))
+        if key[0] <= 0 or key in seen:
+            continue
+        seen.add(key)
+        ordered.append(key)
+    if (season, episode) not in seen:
+        return None, {}
+    if season > 1 and all(item[0] != 1 for item in ordered):
+        return None, {}
+    mapping = {index: pair for index, pair in enumerate(ordered, start=1)}
+    absolute = next(
+        index for index, pair in mapping.items() if pair == (season, episode)
+    )
+    return absolute, mapping
+
 
 def _normalize_air_date(raw_value) -> str | None:
     if not isinstance(raw_value, str) or not raw_value:
@@ -344,3 +376,24 @@ class EpisodeIndexService:
                 return cached_episode
 
         return await self._get_cached_episode(series_id, normalized_air_date, None)
+
+    async def get_absolute_episode_index(
+        self,
+        series_id: str,
+        season: int | None,
+        episode: int | None,
+    ) -> tuple[int | None, dict[int, tuple[int, int]]]:
+        if (
+            not isinstance(series_id, str)
+            or not series_id.startswith("tt")
+            or season is None
+            or episode is None
+            or season <= 0
+        ):
+            return None, {}
+
+        rows = await database.fetch_all(
+            _SERIES_NUMBERED_EPISODES_QUERY,
+            {"series_id": series_id},
+        )
+        return absolute_index_from_rows(rows or [], season, episode)

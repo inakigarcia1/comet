@@ -205,7 +205,7 @@ class StremThruTrustedFileIndexTests(unittest.IsolatedAsyncioTestCase):
             patch.object(
                 client,
                 "_episode_request_context",
-                new=AsyncMock(return_value=(True, 1, 1, None)),
+                new=AsyncMock(return_value=(True, 1, 1, None, None)),
             ),
             self.assertRaises(DebridLinkGenerationError) as raised,
         ):

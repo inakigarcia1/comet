@@ -16,6 +16,7 @@ class ScrapeRequest(BaseModel):
     episode: int | None = None
     context: ScrapeContext = ScrapeContext.LIVE
     search_titles: tuple[str, ...] = ()
+    absolute_episode: int | None = None
 
     @property
     def query_titles(self) -> tuple[str, ...]:
@@ -33,6 +34,15 @@ class ScrapeRequest(BaseModel):
                 queries.append(f"{title} S{self.season:02d}")
                 if self.episode is not None:
                     queries.append(f"{title} S{self.season:02d}E{self.episode:02d}")
+            if (
+                self.absolute_episode is not None
+                and self.episode is not None
+                and self.absolute_episode != self.episode
+            ):
+                queries.append(f"{title} {self.absolute_episode}")
+                padded = f"{self.absolute_episode:03d}"
+                if padded != str(self.absolute_episode):
+                    queries.append(f"{title} {padded}")
         return tuple(dict.fromkeys(queries))
 
 

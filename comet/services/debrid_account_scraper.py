@@ -587,6 +587,7 @@ async def get_account_torrents_for_media(
     target_air_date: str | None = None,
     reject_unknown_episode_files: bool = False,
     origin: str | None = None,
+    absolute_episode: int | None = None,
 ):
     account_torrents = {}
     service_cache_status = {}
@@ -685,6 +686,7 @@ async def get_account_torrents_for_media(
                 episode,
                 target_air_date=target_air_date,
                 reject_unknown_episode_files=reject_unknown_episode_files,
+                absolute_episode=absolute_episode,
             ):
                 continue
 

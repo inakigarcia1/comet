@@ -1,10 +1,63 @@
 import asyncio
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from comet.core.scrape import ScrapeContext
 from comet.services.orchestration import TorrentManager, scraper_manager, settings
 from comet.services.user_filters import build_user_filters
+
+
+def _cache_torrent(parsed):
+    return {
+        "parsed": parsed,
+        "infoHash": "hash",
+        "fileIndex": None,
+        "title": "release",
+        "size": 1,
+        "seeders": 1,
+        "tracker": "Nyaa",
+        "sources": [],
+    }
+
+
+class AbsoluteCacheWriteTests(unittest.TestCase):
+    def _manager(self):
+        manager = TorrentManager(
+            media_type="series",
+            media_full_id="tt0988824:2:1",
+            media_only_id="tt0988824",
+            title="Naruto: Shippuden",
+            year=2007,
+            year_end=2017,
+            season=2,
+            episode=1,
+            aliases={},
+            remove_adult_content=False,
+            search_season=2,
+            search_episode=1,
+            absolute_episode=33,
+            absolute_index={1: (1, 1), 33: (2, 1), 54: (3, 1)},
+        )
+        return manager
+
+    def test_absolute_file_is_stored_as_the_real_season_episode(self):
+        manager = self._manager()
+        infos = []
+        manager._append_cache_file_infos(
+            infos,
+            _cache_torrent(SimpleNamespace(seasons=[], episodes=[33])),
+        )
+        self.assertEqual([(row["season"], row["episode"]) for row in infos], [(2, 1)])
+
+    def test_other_absolute_number_is_not_stamped_onto_the_searched_season(self):
+        manager = self._manager()
+        infos = []
+        manager._append_cache_file_infos(
+            infos,
+            _cache_torrent(SimpleNamespace(seasons=[], episodes=[1])),
+        )
+        self.assertEqual([(row["season"], row["episode"]) for row in infos], [(1, 1)])
 
 
 class TorrentOrchestrationTests(unittest.IsolatedAsyncioTestCase):
