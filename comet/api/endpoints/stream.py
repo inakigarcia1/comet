@@ -20,6 +20,7 @@ from comet.utils.formatting import (
     get_formatted_components,
     get_formatted_components_plain,
 )
+from comet.utils.network import get_client_ip
 from comet.utils.parsing import is_non_video_file
 
 streams = APIRouter()
