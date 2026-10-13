@@ -126,6 +126,26 @@ class TorrentManager:
         self.ranked_torrents = {}
         self.primary_cached = False
         self.live_result_timestamp = time.time()
+        self.blacklisted_hashes: set[str] = set()
+
+    async def load_blacklisted_hashes(self) -> None:
+        from comet.services.stream_blacklist import fetch_blacklisted_info_hashes
+
+        self.blacklisted_hashes = await fetch_blacklisted_info_hashes(
+            self.cache_media_ids,
+            self.search_season,
+            self.search_episode,
+        )
+
+    def is_blacklisted(self, info_hash: str) -> bool:
+        return info_hash.lower() in self.blacklisted_hashes
+
+    def drop_blacklisted_torrents(self) -> None:
+        if not self.blacklisted_hashes:
+            return
+        for info_hash in list(self.torrents):
+            if self.is_blacklisted(info_hash):
+                del self.torrents[info_hash]
 
     def _matches_requested_scope(
         self,
@@ -200,6 +220,8 @@ class TorrentManager:
             return
 
         info_hash = torrent["infoHash"]
+        if self.is_blacklisted(info_hash):
+            return
         self.torrents[info_hash] = {
             "fileIndex": torrent["fileIndex"],
             "title": torrent["title"],
@@ -225,6 +247,7 @@ class TorrentManager:
         return await database.fetch_all(query, params)
 
     async def get_cached_torrents(self):
+        await self.load_blacklisted_hashes()
         rows = []
         cache_row_groups = await asyncio.gather(
             *(
@@ -233,9 +256,14 @@ class TorrentManager:
             )
         )
         for cache_media_id, cache_rows in zip(self.cache_media_ids, cache_row_groups):
-            if cache_rows and cache_media_id == self.media_only_id:
+            visible_rows = [
+                row
+                for row in cache_rows
+                if not self.is_blacklisted(row["info_hash"])
+            ]
+            if visible_rows and cache_media_id == self.media_only_id:
                 self.primary_cached = True
-            rows.extend(cache_rows)
+            rows.extend(visible_rows)
 
         if rows:
             best_rows = {}

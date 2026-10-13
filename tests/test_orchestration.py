@@ -61,6 +61,20 @@ class AbsoluteCacheWriteTests(unittest.TestCase):
 
 
 class TorrentOrchestrationTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        async def _skip_blacklist(_manager):
+            return None
+
+        self._blacklist_patch = patch.object(
+            TorrentManager,
+            "load_blacklisted_hashes",
+            _skip_blacklist,
+        )
+        self._blacklist_patch.start()
+
+    async def asyncTearDown(self):
+        self._blacklist_patch.stop()
+
     async def test_scrapers_receive_titles_selected_from_configured_languages(self):
         manager = TorrentManager(
             media_type="movie",

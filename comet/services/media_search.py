@@ -697,6 +697,8 @@ async def search_media(
         )
 
         for info_hash, account_torrent in account_torrents.items():
+            if torrent_manager.is_blacklisted(info_hash):
+                continue
             existing_torrent = torrent_manager.torrents.get(info_hash)
             if existing_torrent is None:
                 torrent_manager.torrents[info_hash] = account_torrent
@@ -835,6 +837,12 @@ async def search_media(
         f"{len(torrent_manager.ranked_torrents)}/{initial_torrent_count}",
     )
 
+    torrent_manager.drop_blacklisted_torrents()
+    ranked_info_hashes = [
+        info_hash
+        for info_hash in torrent_manager.ranked_torrents
+        if info_hash in torrent_manager.torrents
+    ]
     return _attach_cache_trace(
         MediaSearchResult(
             MediaSearchStatus.OK,
@@ -842,7 +850,7 @@ async def search_media(
             aliases=aliases,
             media_scope=media_scope,
             torrents=torrent_manager.torrents,
-            ranked_info_hashes=list(torrent_manager.ranked_torrents),
+            ranked_info_hashes=ranked_info_hashes,
             service_cache_status=service_cache_status,
             debrid_errors=debrid_errors,
             cache_state=cache_state,

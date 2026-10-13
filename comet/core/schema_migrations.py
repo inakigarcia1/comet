@@ -35,6 +35,7 @@ from comet.core.schema_specs import (
     SCRAPE_LOCKS_TABLE_SPEC,
     SERIES_EPISODE_INDEX_REFRESH_TABLE_SPEC,
     SERIES_EPISODE_INDEX_TABLE_SPEC,
+    STREAM_BLACKLIST_TABLE_SPEC,
     TORRENTS_TABLE_SPEC,
     UNIQUE_INDEX_SPECS,
     LegacyColumnMigration,
@@ -1007,6 +1008,11 @@ async def _migration_media_origin(ctx: MigrationContext):
     return True
 
 
+async def _migration_stream_blacklist(ctx: MigrationContext):
+    await _ensure_managed_table(ctx, STREAM_BLACKLIST_TABLE_SPEC)
+    return True
+
+
 MIGRATIONS = [
     ("2026030901_foundation", _migration_foundation),
     ("2026030902_backfill_canonical_tables", _migration_backfill_canonical_tables),
@@ -1033,4 +1039,5 @@ MIGRATIONS = [
     ("2026072701_imdb_title_lookup", _migration_imdb_title_lookup),
     ("2026081801_torrents_is_manual", _migration_torrents_is_manual),
     ("2026092401_media_origin", _migration_media_origin),
+    ("2026101301_stream_blacklist", _migration_stream_blacklist),
 ]

@@ -2160,9 +2160,82 @@
                     <span id="cache-invalidate-status"></span>
                   </div>
                 </div>
+                <div class="metric-section" style="margin-top: 20px">
+                  <h3>
+                    <sl-icon name="slash-circle"></sl-icon> Blacklist de streams
+                  </h3>
+                  <p style="color: var(--sl-color-neutral-600); margin: 0 0 12px">
+                    Oculta un infohash o magnet para una película o un capítulo concreto.
+                    No vuelve a guardarse en caché para ese contenido. El mismo hash en otro
+                    título o capítulo no se toca.
+                  </p>
+                  <div style="display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap">
+                    <sl-select id="blacklist-media-type" label="Tipo" value="movie" style="min-width: 160px">
+                      <sl-option value="movie">Película</sl-option>
+                      <sl-option value="series">Serie (capítulo)</sl-option>
+                    </sl-select>
+                    <sl-input
+                      id="blacklist-media-id"
+                      label="IMDB id"
+                      placeholder="tt0111161"
+                      style="min-width: 180px"
+                    ></sl-input>
+                    <sl-input
+                      id="blacklist-season"
+                      type="number"
+                      min="0"
+                      label="Temporada"
+                      placeholder="1"
+                      style="width: 140px; display: none"
+                    ></sl-input>
+                    <sl-input
+                      id="blacklist-episode"
+                      type="number"
+                      min="0"
+                      label="Capítulo"
+                      placeholder="1"
+                      style="width: 140px; display: none"
+                    ></sl-input>
+                    <sl-select id="blacklist-kind" label="Formato" value="infohash" style="min-width: 160px">
+                      <sl-option value="infohash">Infohash</sl-option>
+                      <sl-option value="magnet">Magnet link</sl-option>
+                    </sl-select>
+                  </div>
+                  <sl-textarea
+                    id="blacklist-values"
+                    label="Uno por línea (bulk)"
+                    placeholder="0123456789abcdef0123456789abcdef01234567"
+                    rows="4"
+                    style="margin-top: 12px"
+                  ></sl-textarea>
+                  <div style="display: flex; gap: 12px; align-items: center; margin-top: 12px; flex-wrap: wrap">
+                    <sl-button variant="danger" onclick="applyStreamBlacklist()">
+                      Agregar a blacklist
+                    </sl-button>
+                    <sl-button variant="default" onclick="openBlacklistViewer()">
+                      Ver blacklists
+                    </sl-button>
+                    <span id="blacklist-add-status"></span>
+                  </div>
+                </div>
               </div>
             </div>
           </sl-tab-panel>
+
+          <sl-dialog id="blacklist-viewer-dialog" label="Streams en blacklist" style="--width: min(920px, 95vw)">
+            <div id="blacklist-viewer-loading" style="text-align: center; padding: 16px">
+              <sl-spinner></sl-spinner>
+            </div>
+            <div id="blacklist-viewer-content" style="display: none"></div>
+            <div slot="footer" style="display: flex; gap: 8px; justify-content: flex-end">
+              <sl-button variant="default" onclick="document.getElementById('blacklist-viewer-dialog').hide()">
+                Cerrar
+              </sl-button>
+              <sl-button variant="primary" onclick="restoreSelectedBlacklists()">
+                Restaurar seleccionados
+              </sl-button>
+            </div>
+          </sl-dialog>
 
           <sl-tab-panel name="manual-torrents">
             <div class="tab-content">
@@ -2579,6 +2652,208 @@
       }
 
       document.getElementById("cache-scope").addEventListener("sl-change", syncCacheInvalidateFields);
+
+      function syncBlacklistFields() {
+        const mediaType = document.getElementById("blacklist-media-type").value;
+        const season = document.getElementById("blacklist-season");
+        const episode = document.getElementById("blacklist-episode");
+        const isSeries = mediaType === "series";
+        season.style.display = isSeries ? "" : "none";
+        episode.style.display = isSeries ? "" : "none";
+      }
+
+      document.getElementById("blacklist-media-type").addEventListener("sl-change", syncBlacklistFields);
+      syncBlacklistFields();
+
+      async function applyStreamBlacklist() {
+        const status = document.getElementById("blacklist-add-status");
+        const mediaType = document.getElementById("blacklist-media-type").value;
+        const mediaId = (document.getElementById("blacklist-media-id").value || "").trim();
+        const kind = document.getElementById("blacklist-kind").value;
+        const raw = document.getElementById("blacklist-values").value || "";
+        const values = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+        const payload = { mediaType, mediaId, kind, values };
+        if (mediaType === "series") {
+          payload.season = Number((document.getElementById("blacklist-season").value || "").trim());
+          payload.episode = Number((document.getElementById("blacklist-episode").value || "").trim());
+        }
+        status.textContent = "Aplicando...";
+        try {
+          const response = await fetch("/admin/api/blacklist", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            status.textContent = body.detail || "No se pudo agregar";
+            return;
+          }
+          status.textContent =
+            "Listo. Agregados: " +
+            (body.added?.length || 0) +
+            ". Ya estaban: " +
+            (body.alreadyBlacklisted?.length || 0) +
+            ". Filas de caché borradas: " +
+            (body.torrentsDeleted || 0) +
+            ".";
+        } catch (error) {
+          status.textContent = "Error de red";
+          console.error(error);
+        }
+      }
+
+      let blacklistViewerData = [];
+
+      function formatBlacklistScope(entry) {
+        if (entry.season == null && entry.episode == null) return "";
+        const s = String(entry.season ?? 0).padStart(2, "0");
+        const e = String(entry.episode ?? 0).padStart(2, "0");
+        return " S" + s + "E" + e;
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      }
+
+      function renderBlacklistViewer(groups) {
+        const container = document.getElementById("blacklist-viewer-content");
+        if (!groups.length) {
+          container.innerHTML =
+            '<p style="color: var(--sl-color-neutral-500); margin: 0">No hay entradas en la blacklist.</p>';
+          return;
+        }
+        container.innerHTML = groups
+          .map((group, groupIndex) => {
+            const title = group.title
+              ? escapeHtml(group.title) + " (" + escapeHtml(group.mediaId) + ")"
+              : escapeHtml(group.mediaId);
+            const rows = group.entries
+              .map((entry, entryIndex) => {
+                const id = "bl-" + groupIndex + "-" + entryIndex;
+                return (
+                  '<label style="display: flex; gap: 8px; align-items: center; padding: 4px 0">' +
+                  '<input type="checkbox" class="blacklist-restore-cb" data-group="' +
+                  groupIndex +
+                  '" data-entry="' +
+                  entryIndex +
+                  '" id="' +
+                  id +
+                  '">' +
+                  "<code>" +
+                  escapeHtml(entry.infoHash) +
+                  "</code>" +
+                  formatBlacklistScope(entry) +
+                  "</label>"
+                );
+              })
+              .join("");
+            return (
+              '<div style="margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--sl-color-neutral-200)">' +
+              '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px">' +
+              "<strong>" +
+              title +
+              "</strong>" +
+              '<sl-button size="small" variant="warning" class="blacklist-restore-all" data-media-id="' +
+              escapeHtml(group.mediaId) +
+              '">Restaurar todos</sl-button>' +
+              "</div>" +
+              rows +
+              "</div>"
+            );
+          })
+          .join("");
+        container.querySelectorAll(".blacklist-restore-all").forEach((button) => {
+          button.addEventListener("click", () => restoreAllForMediaId(button.dataset.mediaId));
+        });
+      }
+
+      async function openBlacklistViewer() {
+        const dialog = document.getElementById("blacklist-viewer-dialog");
+        const loading = document.getElementById("blacklist-viewer-loading");
+        const content = document.getElementById("blacklist-viewer-content");
+        loading.style.display = "";
+        content.style.display = "none";
+        dialog.show();
+        try {
+          const response = await fetch("/admin/api/blacklist");
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            loading.textContent = body.detail || "No se pudo cargar";
+            return;
+          }
+          blacklistViewerData = body.groups || [];
+          renderBlacklistViewer(blacklistViewerData);
+          loading.style.display = "none";
+          content.style.display = "";
+        } catch (error) {
+          loading.textContent = "Error de red";
+          console.error(error);
+        }
+      }
+
+      async function restoreAllForMediaId(mediaId) {
+        if (!confirm("¿Restaurar todos los streams baneados para " + mediaId + "?")) return;
+        try {
+          const response = await fetch("/admin/api/blacklist", {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ mediaId }),
+          });
+          if (!response.ok) {
+            const body = await response.json().catch(() => ({}));
+            alert(body.detail || "No se pudo restaurar");
+            return;
+          }
+          await openBlacklistViewer();
+        } catch (error) {
+          console.error(error);
+          alert("Error de red");
+        }
+      }
+
+      async function restoreSelectedBlacklists() {
+        const checks = document.querySelectorAll(".blacklist-restore-cb:checked");
+        if (!checks.length) {
+          alert("Elegí al menos una entrada.");
+          return;
+        }
+        const byMedia = {};
+        checks.forEach((cb) => {
+          const g = Number(cb.dataset.group);
+          const e = Number(cb.dataset.entry);
+          const group = blacklistViewerData[g];
+          const entry = group.entries[e];
+          if (!byMedia[group.mediaId]) byMedia[group.mediaId] = [];
+          byMedia[group.mediaId].push({
+            infoHash: entry.infoHash,
+            season: entry.season,
+            episode: entry.episode,
+          });
+        });
+        try {
+          for (const mediaId of Object.keys(byMedia)) {
+            const response = await fetch("/admin/api/blacklist", {
+              method: "DELETE",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ mediaId, entries: byMedia[mediaId] }),
+            });
+            if (!response.ok) {
+              const body = await response.json().catch(() => ({}));
+              alert(body.detail || "No se pudo restaurar " + mediaId);
+              return;
+            }
+          }
+          await openBlacklistViewer();
+        } catch (error) {
+          console.error(error);
+          alert("Error de red");
+        }
+      }
 
       async function invalidateTorrentCache() {
         const status = document.getElementById("cache-invalidate-status");

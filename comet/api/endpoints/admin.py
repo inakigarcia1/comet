@@ -3,7 +3,10 @@ import secrets
 import time
 
 import orjson
-from fastapi import APIRouter, Cookie, Form, HTTPException, Request
+from typing import Annotated
+
+from fastapi import APIRouter, Cookie, Form, Header, HTTPException, Request
+from pydantic import ValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
@@ -12,10 +15,16 @@ from comet.api.models.manual_torrent import (
     ManualTorrentDelete,
     ManualTorrentIn,
 )
+from comet.api.models.stream_blacklist import StreamBlacklistAdd, StreamBlacklistRemove
 from comet.background_scraper.worker import background_scraper
 from comet.core.logger import log_capture, logger
 from comet.core.models import database, settings
 from comet.services.cache_invalidate import invalidate_for_scope, parse_invalidate_body
+from comet.services.stream_blacklist import (
+    add_stream_blacklist,
+    list_stream_blacklist,
+    remove_stream_blacklist,
+)
 from comet.services.admin_manual_torrents import (
     delete_manual,
     insert_manual,
@@ -82,9 +91,31 @@ def verify_admin_session(admin_session: str | None):
 
 def require_admin_auth(
     admin_session: str | None = Cookie(None, description="Admin session token"),
+    authorization: Annotated[str | None, Header()] = None,
 ):
-    if not verify_admin_session(admin_session):
-        raise HTTPException(status_code=401, detail="Authentication required")
+    if verify_admin_session(admin_session):
+        return
+    if authorization and authorization.lower().startswith("bearer "):
+        token = authorization[7:].strip()
+        admin_password = settings.ADMIN_DASHBOARD_PASSWORD
+        if (
+            admin_password
+            and token
+            and secrets.compare_digest(token, admin_password)
+        ):
+            return
+    raise HTTPException(status_code=401, detail="Authentication required")
+
+
+def parse_blacklist_body(model, body: object):
+    try:
+        return model.model_validate(body)
+    except ValidationError as exc:
+        err = exc.errors()[0]
+        loc = ".".join(str(part) for part in err.get("loc", ()))
+        msg = err.get("msg", "invalid body")
+        detail = f"{loc}: {msg}" if loc else msg
+        raise HTTPException(status_code=400, detail=detail) from exc
 
 
 @router.get(
@@ -192,8 +223,9 @@ async def admin_logout():
 async def admin_invalidate_cache(
     request: Request,
     admin_session: str = Cookie(None, description="Admin session token"),
+    authorization: Annotated[str | None, Header()] = None,
 ):
-    require_admin_auth(admin_session)
+    require_admin_auth(admin_session, authorization)
     try:
         body = orjson.loads(await request.body())
     except orjson.JSONDecodeError:
@@ -215,6 +247,74 @@ async def admin_invalidate_cache(
         f"seasons={deleted['seasons']}",
     )
     return JSONResponse(deleted)
+
+
+@router.post(
+    "/admin/api/blacklist",
+    tags=["Admin"],
+    summary="Ban infohashes for one movie or episode",
+)
+async def admin_blacklist_add(
+    request: Request,
+    admin_session: str = Cookie(None, description="Admin session token"),
+    authorization: Annotated[str | None, Header()] = None,
+):
+    require_admin_auth(admin_session, authorization)
+    try:
+        body = orjson.loads(await request.body())
+    except orjson.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="invalid json") from None
+    payload = parse_blacklist_body(StreamBlacklistAdd, body)
+    try:
+        result = await add_stream_blacklist(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    logger.log(
+        "SCRAPER",
+        "STREAM BLACKLIST ADD "
+        f"media={result['mediaId']} season={result['season']} episode={result['episode']} "
+        f"added={len(result['added'])} torrents_deleted={result['torrentsDeleted']}",
+    )
+    return JSONResponse(result)
+
+
+@router.get(
+    "/admin/api/blacklist",
+    tags=["Admin"],
+    summary="List stream blacklist entries grouped by IMDB id",
+)
+async def admin_blacklist_list(
+    admin_session: str = Cookie(None, description="Admin session token"),
+    authorization: Annotated[str | None, Header()] = None,
+):
+    require_admin_auth(admin_session, authorization)
+    return JSONResponse(await list_stream_blacklist())
+
+
+@router.delete(
+    "/admin/api/blacklist",
+    tags=["Admin"],
+    summary="Restore blacklisted streams",
+)
+async def admin_blacklist_remove(
+    request: Request,
+    admin_session: str = Cookie(None, description="Admin session token"),
+    authorization: Annotated[str | None, Header()] = None,
+):
+    require_admin_auth(admin_session, authorization)
+    try:
+        body = orjson.loads(await request.body())
+    except orjson.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="invalid json") from None
+    payload = parse_blacklist_body(StreamBlacklistRemove, body)
+    result = await remove_stream_blacklist(payload)
+    logger.log(
+        "SCRAPER",
+        "STREAM BLACKLIST REMOVE "
+        f"media={result['mediaId']} removed={result['removed']} "
+        f"demand_cleared={result['demandRowsUpdated']}",
+    )
+    return JSONResponse(result)
 
 
 @router.get(

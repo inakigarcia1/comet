@@ -1705,12 +1705,28 @@ async def _execute_batched_upsert(rows: list[_TorrentUpdate], *, updated_at: flo
     if not rows:
         return
 
+    from comet.services.stream_blacklist import (
+        _delete_torrent_rows_for_keys,
+        _row_key,
+        fetch_blacklisted_row_keys,
+    )
+
+    keys = [
+        _row_key(item.media_id, item.info_hash, item.season_norm, item.episode_norm)
+        for item in rows
+    ]
     sources_json_cache = {}
     parsed_json_cache = {}
 
     async with database.transaction():
-        for start in range(0, len(rows), UPSERT_MAX_ROWS_PER_STATEMENT):
-            chunk = rows[start : start + UPSERT_MAX_ROWS_PER_STATEMENT]
+        blacklisted = await fetch_blacklisted_row_keys(keys)
+        pending = [
+            item
+            for item, key in zip(rows, keys, strict=True)
+            if key not in blacklisted
+        ]
+        for start in range(0, len(pending), UPSERT_MAX_ROWS_PER_STATEMENT):
+            chunk = pending[start : start + UPSERT_MAX_ROWS_PER_STATEMENT]
             await database.execute(
                 _build_batched_upsert_statement(len(chunk)),
                 _build_batched_params(
@@ -1720,8 +1736,17 @@ async def _execute_batched_upsert(rows: list[_TorrentUpdate], *, updated_at: flo
                     parsed_json_cache=parsed_json_cache,
                 ),
             )
+        # Second read: a ban committed while this batch was inserting.
+        blacklisted = await fetch_blacklisted_row_keys(keys)
+        if blacklisted:
+            await _delete_torrent_rows_for_keys(list(blacklisted))
 
-    await _apply_manual_flags(rows)
+    kept = [
+        item
+        for item, key in zip(rows, keys, strict=True)
+        if key not in blacklisted
+    ]
+    await _apply_manual_flags(kept)
 
 
 _MANUAL_FLAG_COLUMNS_PER_ROW = 6

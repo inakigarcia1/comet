@@ -300,6 +300,34 @@ MEDIA_DEMAND_TABLE_SPEC = ManagedTableSpec(
 DEBRID_ACCOUNT_TRACKER_PREDICATE = "substr(tracker, 1, 14) = 'DebridAccount|'"
 
 
+STREAM_BLACKLIST_TABLE_SPEC = ManagedTableSpec(
+    table_name="stream_blacklist",
+    create_sql="""
+        CREATE TABLE {table_name} (
+            media_id TEXT NOT NULL,
+            info_hash TEXT NOT NULL,
+            season INTEGER,
+            episode INTEGER,
+            season_norm INTEGER NOT NULL DEFAULT -1,
+            episode_norm INTEGER NOT NULL DEFAULT -1,
+            created_at REAL NOT NULL,
+            CHECK ((season IS NULL AND season_norm = -1) OR season = season_norm),
+            CHECK ((episode IS NULL AND episode_norm = -1) OR episode = episode_norm)
+        )
+    """,
+    index_sql=(
+        """
+            CREATE UNIQUE INDEX IF NOT EXISTS unq_stream_blacklist_scope_v1
+            ON {table_name} (media_id, info_hash, season_norm, episode_norm)
+        """,
+        """
+            CREATE INDEX IF NOT EXISTS idx_stream_blacklist_media_v1
+            ON {table_name} (media_id)
+        """,
+    ),
+)
+
+
 TORRENTS_TABLE_SPEC = ManagedTableSpec(
     table_name="torrents",
     create_sql="""
@@ -857,6 +885,7 @@ CURRENT_NON_UNIQUE_INDEX_SPECS = (
     SERIES_EPISODE_INDEX_TABLE_SPEC,
     SERIES_EPISODE_INDEX_REFRESH_TABLE_SPEC,
     MEDIA_DEMAND_TABLE_SPEC,
+    STREAM_BLACKLIST_TABLE_SPEC,
     TORRENTS_TABLE_SPEC,
     DEBRID_AVAILABILITY_TABLE_SPEC,
     DOWNLOAD_LINKS_CACHE_TABLE_SPEC,
