@@ -311,7 +311,9 @@ class TorrentManager:
                 continue
             ensure_multi_language(parsed_data)
 
-            is_manual = bool(row.get("is_manual")) if hasattr(row, "get") else False
+            # databases.Record has no .get(). Falling back to False drops every
+            # manual row back into the title and resolution filters.
+            is_manual = bool(row["is_manual"])
 
             reject_unknown_override = (
                 True
