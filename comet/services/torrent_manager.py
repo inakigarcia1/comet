@@ -1749,11 +1749,7 @@ async def _execute_batched_upsert(rows: list[_TorrentUpdate], *, updated_at: flo
     await _apply_manual_flags(kept)
 
 
-_MANUAL_FLAG_COLUMNS_PER_ROW = 6
-_MANUAL_FLAG_PARAMS_PER_ROW = 4
-
-
-def _build_manual_flag_statement(row_count: int) -> str:
+def _build_manual_flag_statement() -> str:
     return (
         "UPDATE torrents SET is_manual = 1, manual_share_cometnet = :msc "
         "WHERE media_id = :media_id AND info_hash = :info_hash "
@@ -1761,43 +1757,25 @@ def _build_manual_flag_statement(row_count: int) -> str:
     )
 
 
-def _build_manual_flag_params(rows: list[_TorrentUpdate]) -> dict:
-    params: dict = {}
-    for index, item in enumerate(rows):
-        params[f"media_id_{index}"] = item.media_id
-        params[f"info_hash_{index}"] = item.info_hash
-        params[f"season_norm_{index}"] = item.season_norm
-        params[f"episode_norm_{index}"] = item.episode_norm
-        params[f"msc_{index}"] = 1 if item.manual_share_cometnet else 0
-    return params
-
-
 async def _apply_manual_flags(rows: list[_TorrentUpdate]) -> None:
     manual_rows = [item for item in rows if item.is_manual]
     if not manual_rows:
         return
 
-    max_rows = max(
-        1,
-        (DB_MAX_PARAMETERS - 1) // _MANUAL_FLAG_PARAMS_PER_ROW,
-    )
-    for start in range(0, len(manual_rows), max_rows):
-        chunk = manual_rows[start : start + max_rows]
-        # Build a multi-statement SQL with bound parameters per row.
-        statements = []
-        params: dict = {}
-        for index, item in enumerate(chunk):
-            statements.append(
-                f"UPDATE torrents SET is_manual = 1, manual_share_cometnet = :msc_{index} "
-                f"WHERE media_id = :media_id_{index} AND info_hash = :info_hash_{index} "
-                f"AND season_norm = :season_norm_{index} AND episode_norm = :episode_norm_{index}"
-            )
-            params[f"msc_{index}"] = 1 if item.manual_share_cometnet else 0
-            params[f"media_id_{index}"] = item.media_id
-            params[f"info_hash_{index}"] = item.info_hash
-            params[f"season_norm_{index}"] = item.season_norm
-            params[f"episode_norm_{index}"] = item.episode_norm
-        await database.execute("; ".join(statements), params)
+    # One statement per row. asyncpg rejects several commands in one prepared
+    # statement, so a semicolon-joined batch leaves is_manual at its default.
+    statement = _build_manual_flag_statement()
+    for item in manual_rows:
+        await database.execute(
+            statement,
+            {
+                "msc": 1 if item.manual_share_cometnet else 0,
+                "media_id": item.media_id,
+                "info_hash": item.info_hash,
+                "season_norm": item.season_norm,
+                "episode_norm": item.episode_norm,
+            },
+        )
 
 
 async def _execute_isolated_batched_upsert(

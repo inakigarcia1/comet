@@ -598,7 +598,7 @@ class StremThru:
             name = unquote(name)
             torrent_name = unquote(torrent_name)
 
-            if trust_file_index and index not in (None, "", "n"):
+            if trust_file_index:
                 target_file = _pick_file_by_trusted_index(
                     debrid_files,
                     index,

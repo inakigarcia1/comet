@@ -315,6 +315,38 @@ class StremThruTrustedFileIndexTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(url, "https://cdn.example/play")
         self.assertEqual(calls[1][1], {"link": "https://store.example/ia"})
 
+    async def test_trust_file_index_picks_episode_when_index_is_missing(self):
+        client = self._client()
+        files = [
+            {
+                "name": "T1-002. Supergía [480p].ia.mp4",
+                "index": 9,
+                "size": 200,
+                "link": "https://store.example/ep2",
+            },
+            {
+                "name": "T1-001. Hogar dulce hogar [480p].ia.mp4",
+                "index": 3,
+                "size": 485604078,
+                "link": "https://store.example/ep1",
+            },
+        ]
+        post, calls = self._magnet_then_link(files)
+        with patch.object(client, "_post_store_json", side_effect=post):
+            url = await client.generate_download_link(
+                self._HASH,
+                "n",
+                "T1-001. Hogar dulce hogar [480p].ia.mp4",
+                "Casados con hijos",
+                1,
+                1,
+                trust_file_index=True,
+                expected_size=485604078,
+            )
+
+        self.assertEqual(url, "https://cdn.example/play")
+        self.assertEqual(calls[1][1], {"link": "https://store.example/ep1"})
+
     async def test_trust_file_index_missing_link_is_not_cached_yet(self):
         client = self._client()
         files = [

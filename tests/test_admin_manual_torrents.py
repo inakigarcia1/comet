@@ -1,5 +1,6 @@
 """Tests for the manual torrents admin API and persistence plumbing."""
 
+import asyncio
 import time
 import unittest
 from unittest.mock import patch
@@ -435,6 +436,52 @@ class QueueGateTests(unittest.TestCase):
         self.assertNotIn("Manual-NonShare", Admitted)
         self.assertIn("Manual-Share", Admitted)
         self.assertIn("Scraper", Admitted)
+
+    def test_apply_manual_flags_uses_one_statement_per_row(self):
+        from unittest.mock import AsyncMock, patch
+
+        from comet.services.torrent_manager import (
+            _apply_manual_flags,
+            _construct_torrent_update,
+        )
+
+        def _item(info_hash, *, is_manual, share=False, episode=1):
+            return _construct_torrent_update(
+                media_id="tt0451493",
+                info_hash=info_hash,
+                season=1,
+                episode=episode,
+                file_index=None,
+                title="T1-001. Hogar dulce hogar [480p].ia.mp4",
+                seeders=1,
+                size=100,
+                tracker="Manual",
+                sources=[],
+                parsed={},
+                from_cometnet=False,
+                is_manual=is_manual,
+                manual_share_cometnet=share,
+            )
+
+        manual = _item("a" * 40, is_manual=True)
+        shared = _item("b" * 40, is_manual=True, share=True, episode=2)
+        scraper = _item("c" * 40, is_manual=False)
+
+        async def _run():
+            execute = AsyncMock()
+            with patch("comet.services.torrent_manager.database") as db:
+                db.execute = execute
+                await _apply_manual_flags([manual, shared, scraper])
+            return execute
+
+        execute = asyncio.run(_run())
+        self.assertEqual(execute.await_count, 2)
+        for call in execute.await_args_list:
+            self.assertNotIn(";", call.args[0])
+        self.assertEqual(execute.await_args_list[0].args[1]["info_hash"], "a" * 40)
+        self.assertEqual(execute.await_args_list[0].args[1]["msc"], 0)
+        self.assertEqual(execute.await_args_list[1].args[1]["episode_norm"], 2)
+        self.assertEqual(execute.await_args_list[1].args[1]["msc"], 1)
 
 
 if __name__ == "__main__":
