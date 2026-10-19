@@ -25,6 +25,7 @@ from comet.services.debrid_account_scraper import (
 )
 from comet.services.lock import DistributedLock
 from comet.services.orchestration import TorrentManager
+from comet.services.ranking import pack_without_file_index
 from comet.utils.http_client import http_client_manager
 from comet.utils.parsing import MediaScope, parse_media_id, resolve_media_scope
 
@@ -63,6 +64,7 @@ class MediaSearchResult:
     wrote_resolutions: dict = field(default_factory=dict)
     scraped: bool = False
     cache_decision: str = ""
+    season_episode_counts: dict = field(default_factory=dict)
 
 
 def episode_matching_policy(
@@ -136,6 +138,8 @@ def select_debrid_refresh_hashes(
     *,
     had_cached_torrents: bool,
     use_account_scrape: bool,
+    torrents: dict | None = None,
+    series: bool = False,
 ) -> set[str]:
     if not current_hashes:
         return set()
@@ -150,7 +154,15 @@ def select_debrid_refresh_hashes(
         or verified_count == 0
         or (verified_count / len(current_hashes)) < settings.DEBRID_CACHE_CHECK_RATIO
     )
-    return current_hashes if requires_full_refresh else current_hashes - initial_hashes
+    selected = (
+        current_hashes if requires_full_refresh else current_hashes - initial_hashes
+    )
+    if not torrents:
+        return selected
+    for info_hash in current_hashes:
+        if pack_without_file_index(torrents.get(info_hash), series=series):
+            selected.add(info_hash)
+    return selected
 
 
 async def background_scrape(
@@ -185,6 +197,7 @@ async def background_scrape(
                 torrent_manager.media_scope,
                 ip,
                 target_air_date=torrent_manager.target_air_date,
+                series=torrent_manager.media_type == "series",
             )
 
     try:
@@ -257,6 +270,7 @@ async def get_and_cache_multi_service_availability(
     ip: str,
     target_air_date: str | None = None,
     known_cache_status: dict | None = None,
+    series: bool = False,
 ):
     service_cache_status = defaultdict(dict)
     errors = {}
@@ -282,6 +296,7 @@ async def get_and_cache_multi_service_availability(
             info_hash
             for info_hash in info_hashes
             if not known_cache_status.get(info_hash, {}).get(service, False)
+            or pack_without_file_index(torrents.get(info_hash), series=series)
         ]
         if not service_info_hashes:
             return service, set(), {}, None, set()
@@ -763,6 +778,8 @@ async def search_media(
         verified_service_cache_status,
         had_cached_torrents=cache_result.has_cached_torrents,
         use_account_scrape=use_account_scrape,
+        torrents=torrent_manager.torrents,
+        series=media_type == "series",
     )
 
     debrid_errors = {}
@@ -794,6 +811,7 @@ async def search_media(
             ip,
             target_air_date=target_air_date,
             known_cache_status=service_cache_status,
+            series=media_type == "series",
         )
         merge_service_cache_status(service_cache_status, fresh_service_cache_status)
         for info_hash in archive_only:
@@ -843,6 +861,14 @@ async def search_media(
         for info_hash in torrent_manager.ranked_torrents
         if info_hash in torrent_manager.torrents
     ]
+    season_episode_counts = {}
+    if media_type == "series" and any(
+        pack_without_file_index(torrent, series=True)
+        for torrent in torrent_manager.torrents.values()
+    ):
+        season_episode_counts = await EpisodeIndexService(session).season_episode_counts(
+            media_only_id
+        )
     return _attach_cache_trace(
         MediaSearchResult(
             MediaSearchStatus.OK,
@@ -861,6 +887,7 @@ async def search_media(
             sort_mixed=sort_mixed,
             show_account_sync_trigger=use_account_scrape,
             use_account_scrape=use_account_scrape,
+            season_episode_counts=season_episode_counts,
         ),
         torrent_manager,
         scraped=did_scrape,

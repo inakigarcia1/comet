@@ -234,6 +234,53 @@ class TorrentOrchestrationTests(unittest.IsolatedAsyncioTestCase):
             manager._remember_live_torrent(item)
         self.assertEqual(set(manager.torrents), {playable["infoHash"]})
 
+    async def test_plan_size_cap_filters_the_response_and_not_the_cache(self):
+        from RTN import DefaultRanking
+
+        from comet.core.models import CometSettingsModel
+
+        manager = TorrentManager(
+            media_type="series",
+            media_full_id="tt0098844:1:1",
+            media_only_id="tt0098844",
+            title="Law & Order",
+            year=1990,
+            year_end=None,
+            season=1,
+            episode=1,
+            aliases={},
+            remove_adult_content=False,
+        )
+        huge = {
+            "title": "Law.and.Order.S01E01.1080p.WEB-DL",
+            "infoHash": "c" * 40,
+            "fileIndex": 0,
+            "seeders": 5,
+            "size": 40 * 1024**3,
+            "tracker": "Test",
+            "sources": [],
+        }
+
+        await manager.filter_manager("Test", [huge])
+
+        self.assertEqual(
+            [item["infoHash"] for item in manager.ready_to_cache],
+            [huge["infoHash"]],
+        )
+        manager._remember_live_torrent(manager.ready_to_cache[0])
+        self.assertIn(huge["infoHash"], manager.torrents)
+
+        await manager.rank_torrents(
+            CometSettingsModel(),
+            DefaultRanking(),
+            0,
+            30 * 1024**3,
+            False,
+        )
+
+        self.assertNotIn(huge["infoHash"], manager.ranked_torrents)
+        self.assertIn(huge["infoHash"], manager.torrents)
+
     async def test_playback_score_filters_the_response_and_not_the_cache(self):
         device = {
             "screen": {"width": 3840, "height": 2160},

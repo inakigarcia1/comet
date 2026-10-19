@@ -1,5 +1,6 @@
 import asyncio
 import unittest
+from types import SimpleNamespace
 from typing import ClassVar
 from unittest.mock import patch
 
@@ -84,6 +85,34 @@ class MultiServiceDebridTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(selected, {new_hash})
 
+    def test_cached_pack_without_a_file_index_is_rechecked(self):
+        old_hash = "a" * 40
+        new_hash = "b" * 40
+        pack = {
+            "fileIndex": None,
+            "parsed": SimpleNamespace(seasons=(1,), episodes=(), complete=False),
+        }
+        episode = {
+            "fileIndex": 2,
+            "parsed": SimpleNamespace(seasons=(1,), episodes=(3,), complete=False),
+        }
+
+        with patch(
+            "comet.services.media_search.settings.DEBRID_CACHE_CHECK_RATIO",
+            0.0,
+        ):
+            selected = select_debrid_refresh_hashes(
+                {old_hash, new_hash},
+                {old_hash},
+                {old_hash: {"torbox": True}},
+                had_cached_torrents=True,
+                use_account_scrape=False,
+                torrents={old_hash: pack, new_hash: episode},
+                series=True,
+            )
+
+        self.assertEqual(selected, {old_hash, new_hash})
+
     async def test_fresh_check_skips_service_specific_positive_cache_hits(self):
         first_hash = "a" * 40
         second_hash = "b" * 40
@@ -124,6 +153,52 @@ class MultiServiceDebridTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(_SelectiveDebridService.checked_hashes["first"], [second_hash])
         self.assertEqual(_SelectiveDebridService.checked_hashes["second"], [first_hash])
+
+    async def test_known_cached_pack_without_a_file_is_still_probed(self):
+        pack_hash = "a" * 40
+        file_hash = "b" * 40
+        torrents = {
+            pack_hash: {
+                "title": "Breaking.Bad.S01.COMPLETE.mkv",
+                "seeders": 1,
+                "tracker": "tracker",
+                "sources": [],
+                "fileIndex": None,
+                "parsed": SimpleNamespace(seasons=(1,), episodes=(), complete=False),
+            },
+            file_hash: {
+                "title": "Breaking.Bad.S01E03.mkv",
+                "seeders": 1,
+                "tracker": "tracker",
+                "sources": [],
+                "fileIndex": 4,
+                "parsed": SimpleNamespace(seasons=(1,), episodes=(3,), complete=False),
+            },
+        }
+        _SelectiveDebridService.checked_hashes = {}
+
+        with patch(
+            "comet.services.media_search.DebridService",
+            new=_SelectiveDebridService,
+        ):
+            await get_and_cache_multi_service_availability(
+                None,
+                [{"service": "torbox", "apiKey": "one"}],
+                torrents,
+                "tt0903747:1:3",
+                "tt0903747",
+                1,
+                3,
+                MediaScope.EPISODE,
+                "",
+                known_cache_status={
+                    pack_hash: {"torbox": True},
+                    file_hash: {"torbox": True},
+                },
+                series=True,
+            )
+
+        self.assertEqual(_SelectiveDebridService.checked_hashes["torbox"], [pack_hash])
 
     async def test_cached_enrichment_uses_configured_order_not_completion_order(self):
         info_hash = "a" * 40

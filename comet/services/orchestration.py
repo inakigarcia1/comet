@@ -584,6 +584,7 @@ class TorrentManager:
                 max_results_per_resolution,
                 max_size,
                 remove_trash,
+                self.media_type == "series",
             )
         else:
             ranked_torrents = {}

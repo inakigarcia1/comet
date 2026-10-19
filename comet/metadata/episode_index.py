@@ -87,6 +87,13 @@ _SERIES_NUMBERED_EPISODES_QUERY = """
     ORDER BY season, episode
 """
 
+_SEASON_EPISODE_COUNTS_QUERY = """
+    SELECT season, COUNT(*) AS episode_count
+    FROM series_episode_index
+    WHERE series_id = :series_id
+    GROUP BY season
+"""
+
 def absolute_index_from_rows(rows, season: int, episode: int):
     """Map broadcast order to absolute episode numbers.
 
@@ -376,6 +383,29 @@ class EpisodeIndexService:
                 return cached_episode
 
         return await self._get_cached_episode(series_id, normalized_air_date, None)
+
+    async def _season_episode_counts(self, series_id: str) -> dict[int, int]:
+        rows = await database.fetch_all(
+            _SEASON_EPISODE_COUNTS_QUERY,
+            {"series_id": series_id},
+        )
+        counts = {}
+        for row in rows or []:
+            counts[int(row["season"])] = int(row["episode_count"])
+        return counts
+
+    async def season_episode_counts(self, series_id: str) -> dict[int, int]:
+        """Episodes per season from the Cinemeta index. One refresh if it is empty."""
+        if not isinstance(series_id, str) or not series_id.startswith("tt"):
+            return {}
+        counts = await self._season_episode_counts(series_id)
+        if counts:
+            return counts
+        min_timestamp = time.time() - settings.METADATA_CACHE_TTL
+        if await self._is_series_index_fresh(series_id, min_timestamp):
+            return {}
+        await self._refresh_from_cinemeta(series_id)
+        return await self._season_episode_counts(series_id)
 
     async def get_absolute_episode_index(
         self,

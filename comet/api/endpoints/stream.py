@@ -9,8 +9,9 @@ from comet.core.models import settings
 from comet.debrid.manager import get_debrid_extension
 from comet.observability import metrics
 from comet.services.cache_admission import CACHE_RESULTS_PER_RESOLUTION, format_counts
-from comet.services.media_search import MediaSearchStatus, search_media
 from comet.services.compatibility import describe_device, evaluate_title
+from comet.services.media_search import MediaSearchStatus, search_media
+from comet.services.ranking import shown_byte_size
 from comet.services.trace import current_trace, set_trace
 from comet.services.trackers import trackers
 from comet.utils.cache import CachePolicies, cached_json_response
@@ -550,7 +551,11 @@ async def stream(
             return
         rtn_data = torrent["parsed"]
         torrent_title = torrent["title"]
-        torrent_size = torrent["size"]
+        torrent_size = shown_byte_size(
+            torrent,
+            search_result.season_episode_counts,
+            series=media_type == "series",
+        )
         formatted_components = format_components(
             rtn_data,
             torrent_title,

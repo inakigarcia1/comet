@@ -2,13 +2,64 @@ from RTN import Torrent, check_fetch_and_rank_many, sort_torrents
 from RTN.exceptions import GarbageTorrent
 
 
-def release_is_pack(parsed) -> bool:
-    """A multi-episode release. Its torrent size is the whole pack, not one file."""
-    episodes = getattr(parsed, "episodes", None) or ()
-    return len(episodes) >= 2
+def release_is_pack(parsed, *, series: bool = False) -> bool:
+    """A multi-file release. Its torrent size is the whole pack, not one file.
+
+    A single episode is not a pack. A movie is not a pack either, even when
+    the title says COMPLETE. A season with no episode number is a pack, and
+    so is a complete series on a series search.
+    """
+    episodes = tuple(getattr(parsed, "episodes", None) or ())
+    if len(episodes) >= 2:
+        return True
+    if episodes:
+        return False
+    if tuple(getattr(parsed, "seasons", None) or ()):
+        return True
+    return bool(series and getattr(parsed, "complete", False))
 
 
-def exceeds_file_size_cap(torrent: dict, max_size: int) -> bool:
+def pack_without_file_index(torrent, *, series: bool = False) -> bool:
+    if not isinstance(torrent, dict) or torrent.get("fileIndex") is not None:
+        return False
+    return release_is_pack(torrent.get("parsed"), series=series)
+
+
+def pack_episode_count(parsed, counts_by_season: dict | None) -> int | None:
+    """Episodes inside a pack. Season counts win. A filename range is the backup."""
+    episodes = tuple(getattr(parsed, "episodes", None) or ())
+    seasons = tuple(getattr(parsed, "seasons", None) or ())
+    counts = counts_by_season or {}
+    if seasons and counts and all(int(season) in counts for season in seasons):
+        total = sum(int(counts[int(season)]) for season in seasons)
+        if total >= 2:
+            return total
+    elif not seasons and getattr(parsed, "complete", False) and counts:
+        total = sum(int(count) for season, count in counts.items() if int(season) > 0)
+        if total >= 2:
+            return total
+    if len(episodes) >= 2:
+        return len(episodes)
+    return None
+
+
+def shown_byte_size(torrent: dict, counts_by_season: dict | None, *, series: bool = False):
+    """Bytes to show. The matched file when debrid found it, otherwise the average."""
+    size = torrent.get("size")
+    if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+        return None
+    if torrent.get("fileIndex") is not None:
+        return size
+    parsed = torrent.get("parsed")
+    if not release_is_pack(parsed, series=series):
+        return size
+    count = pack_episode_count(parsed, counts_by_season)
+    if count is not None and count >= 2:
+        return size // count
+    return size
+
+
+def exceeds_file_size_cap(torrent: dict, max_size: int, *, series: bool = False) -> bool:
     """True when this one file is over the plan cap.
 
     Pack size is not the file size. A 252 GB season stays eligible; the
@@ -19,7 +70,7 @@ def exceeds_file_size_cap(torrent: dict, max_size: int) -> bool:
     size = torrent.get("size")
     if size is None or size <= max_size:
         return False
-    if release_is_pack(torrent.get("parsed")):
+    if release_is_pack(torrent.get("parsed"), series=series):
         return False
     return True
 
@@ -41,11 +92,12 @@ def rank_worker(
     max_results_per_resolution,
     max_size,
     remove_trash,
+    series=False,
 ):
     ranked_torrents = set()
     eligible_torrents = []
     for info_hash, torrent in torrents.items():
-        if exceeds_file_size_cap(torrent, max_size):
+        if exceeds_file_size_cap(torrent, max_size, series=series):
             continue
 
         eligible_torrents.append((info_hash, torrent))
