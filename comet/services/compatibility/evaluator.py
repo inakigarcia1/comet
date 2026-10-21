@@ -119,6 +119,13 @@ def _check_screen(
 ) -> None:
     if not stream.width or not stream.height:
         return
+    platform = _platform(device)
+    if platform == "desktop":
+        return
+    if platform in ("android-tv", "android") and _has_decoder_rates(device):
+        if not _tier_allowed(stream, device, platform):
+            blocking.append("resolution exceeds decoder")
+        return
     if device.screen_width <= 0 or device.screen_height <= 0:
         return
     if not _fits(stream.width, stream.height, device.screen_width, device.screen_height):
@@ -192,6 +199,11 @@ def _check_size_and_fps(
     fps = _stream_fps(stream)
     if fps is None:
         return
+    platform = _platform(device)
+    tier = min(stream.width, stream.height)
+    if platform in ("android", "android-tv") and _tier_allowed(stream, device, platform):
+        if platform == "android" or tier < 2160:
+            return
     target = support
     if target is not None and target.rates and not _rate_covers(stream, target, fps):
         blocking.append("fps exceeds decoder")
@@ -544,6 +556,45 @@ def _rate_covers(stream: StreamCharacteristics, support: CodecSupport, fps: floa
         _fits(stream.width, stream.height, rate[0], rate[1]) and rate[2] + 0.1 >= needed
         for rate in support.rates
     )
+
+
+def _platform(device: DevicePlaybackCapabilities) -> str:
+    return (device.platform or "").strip().lower()
+
+
+def _has_decoder_rates(device: DevicePlaybackCapabilities) -> bool:
+    return any(item.rates for item in device.codecs.values())
+
+
+def _tier_allowed(
+    stream: StreamCharacteristics,
+    device: DevicePlaybackCapabilities,
+    platform: str,
+) -> bool:
+    classes = {_fps_class(fps) for fps in _covering_fps(stream, device)}
+    if not classes:
+        return False
+    has_30 = 30 in classes or 60 in classes
+    has_60 = 60 in classes
+    tier = min(stream.width or 0, stream.height or 0)
+    if platform == "android-tv" and tier >= 2160:
+        return has_30 and has_60
+    return has_30
+
+
+def _covering_fps(stream: StreamCharacteristics, device: DevicePlaybackCapabilities) -> list[int]:
+    if not stream.width or not stream.height:
+        return []
+    found: list[int] = []
+    for support in device.codecs.values():
+        for width, height, fps in support.rates:
+            if _fits(stream.width, stream.height, width, height):
+                found.append(fps)
+    return found
+
+
+def _fps_class(fps: int) -> int:
+    return 60 if fps >= 50 else 30
 
 
 def _fits(video_w: int, video_h: int, limit_w: int, limit_h: int) -> bool:

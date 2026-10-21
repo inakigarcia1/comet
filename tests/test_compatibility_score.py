@@ -23,7 +23,7 @@ def _device(*, main10: bool, dolby: bool = False, screen=(3840, 2160), profiles:
         "playerBackend": "exoplayer",
         "screen": {"width": screen[0], "height": screen[1]},
         "decoderCapabilities": {
-            "video/hevc": {"2160p24": True, "2160p30": True, "1080p60": True},
+            "video/hevc": {"2160p24": True, "2160p30": True, "2160p60": True, "1080p60": True},
             "video/avc": {"1080p60": True, "2160p30": True},
         },
         "hdr": {
@@ -108,10 +108,26 @@ class CompatibilityScoreTests(unittest.TestCase):
         self.assertFalse(risky.incompatible)
         self.assertGreater(safe.score, risky.score)
 
-    def test_phone_screen_rejects_4k_and_keeps_1080p(self):
-        device = _device(main10=True, screen=(1080, 2400))
+    def test_tv_follows_decoder_matrix_instead_of_screen(self):
+        device = _device(main10=True, screen=(1280, 720))
+        self.assertTrue(torrent_title_allowed("Movie.2024.2160p.HEVC.WEB-DL-GROUP", device))
+        self.assertTrue(torrent_title_allowed("Movie.2024.1080p.60fps.H264.WEB-DL-GROUP", device))
+
+        device["decoderCapabilities"]["video/hevc"].pop("2160p60")
         self.assertFalse(torrent_title_allowed("Movie.2024.2160p.HEVC.WEB-DL-GROUP", device))
-        self.assertTrue(torrent_title_allowed(BATMAN, device))
+        hevc = device["decoderCapabilities"]["video/hevc"]
+        hevc.pop("2160p24", None)
+        hevc.pop("2160p30", None)
+        hevc["1080p30"] = True
+        hevc.pop("1080p60", None)
+        self.assertTrue(torrent_title_allowed("Movie.2024.1080p.60fps.HEVC.WEB-DL-GROUP", device))
+
+    def test_mobile_30fps_unlocks_the_whole_resolution(self):
+        device = _device(main10=True, screen=(1080, 2400))
+        device["platform"] = "android"
+        device["decoderCapabilities"] = {"video/hevc": {"2160p30": True, "1080p30": True}}
+        self.assertTrue(torrent_title_allowed("Movie.2024.2160p.60fps.HEVC.WEB-DL-GROUP", device))
+        self.assertTrue(torrent_title_allowed("Movie.2024.1080p.60fps.HEVC.WEB-DL-GROUP", device))
 
     def test_legacy_size_matrix_does_not_treat_main10_as_proven(self):
         legacy = {
